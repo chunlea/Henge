@@ -1,0 +1,37 @@
+core/cpu.h
+  s_862d92eac8a50c::t_965728811a6579 10-13,28-34
+core/machine.c
+  s_862d92eac8a50c::t_01aefad66e02d4 22-27
+core/translate.c
+  s_862d92eac8a50c::t_b2f2bd3fa45702 1075-1078,1080
+host/vm.c
+  s_862d92eac8a50c::t_ef539d62f58d4a 274-277
+tests/test_exc.c
+  s_862d92eac8a50c::t_dd60b3fc379ac8 51
+tests/test_jit.c
+  s_862d92eac8a50c::t_e602e74dd59dd2 25
+tests/test_mem.c
+  s_862d92eac8a50c::t_06b3dc5803cc5d 163
+core/mmu.c
+  s_862d92eac8a50c::t_fa9d04bb3d7bf2 20-24
+core/mmu.h
+  s_862d92eac8a50c::t_cbe3dd42ed3513 60-61
+core/sysreg.c
+  s_862d92eac8a50c::t_2cd7e57e1c80d5 378-382,503-505,507,511-513
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "f9e33c90e17f80a17bef38a2a45c34268cfea527",
+  "prompts": {},
+  "sessions": {
+    "s_862d92eac8a50c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2a2ea67b-10a4-470a-aa9f-ca4aec62a749",
+        "model": "unknown"
+      },
+      "human_author": "chunli <git@chunli.dev>"
+    }
+  }
+}
