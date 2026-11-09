@@ -1,0 +1,49 @@
+Makefile
+  s_32f19243a47117::t_baf420596c2266 63-64,118
+host/linux_boot.c
+  s_32f19243a47117::t_0a794de56c3b50 10,280-287,300-304,325,331-337
+host/linux_boot.h
+  s_32f19243a47117::t_c91cedbe686f3e 17-18,20-21,23-24
+host/linux_disk.c
+  s_88b4b41dd4e594::t_90d948e308a896 1-348
+host/main.c
+  s_32f19243a47117::t_293062301e4995 904-905,966-967,1009-1010,1038-1039,1045-1046,1089
+host/vm.c
+  s_32f19243a47117::t_33a9abd294ff7e 252,294
+host/vm.h
+  s_32f19243a47117::t_9ff939f34825d5 28-29
+host/linux_disk.h
+  s_862d92eac8a50c::t_cb75e9e711211e 1-26
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "1e6d952bc0584fd8b4273008b3f1f2ecfda46072",
+  "prompts": {},
+  "sessions": {
+    "s_32f19243a47117": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c78fdbf0-4bf9-482f-ba49-81423cae2bbd",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "chunli <git@chunli.dev>"
+    },
+    "s_862d92eac8a50c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2a2ea67b-10a4-470a-aa9f-ca4aec62a749",
+        "model": "unknown"
+      },
+      "human_author": "chunli <git@chunli.dev>"
+    },
+    "s_88b4b41dd4e594": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "98a82d02-f90c-4ce4-92d5-c699e5f6aa85",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "chunli <git@chunli.dev>"
+    }
+  }
+}
