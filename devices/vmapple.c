@@ -308,7 +308,7 @@ int hv_vmapple_create(HvVmapple *b, HvMachine *m, HvCpu *cpu, uint64_t ram_size,
                              32 + VMAPPLE_IRQ_PCIE);
     /* Same order as QEMU's documented command line: aux, root, then the NIC. */
     if (aux) b->aux_blk = hv_virtio_blk_create(m, b->pcie, aux, HV_VBLK_AUX);
-    if (root) b->root_blk = hv_virtio_blk_create(m, b->pcie, root, HV_VBLK_ROOT);
+    if (root) b->root_blk = hv_virtio_blk_create(m, b->pcie, root, cfg->linux_guest ? HV_VBLK_PLAIN : HV_VBLK_ROOT);
     if (mac) b->net = hv_virtio_net_create(m, b->pcie, mac);
     b->usb = hv_xhci_create(m, b->pcie);
     /* HV_INPUT_ORDER (experiment): "keyboard" = keyboard only, "swap" = mouse first. */

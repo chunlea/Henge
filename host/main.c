@@ -4,6 +4,8 @@
 /* hengevm: boots the virtual Mac on the macOS host.
    hengevm --rom AVPBooter.vmapple2.bin --disk disk.img --aux auxiliary.bin --ecid N [--seed N] [--ram MB] [--log N] */
 #include <CoreFoundation/CoreFoundation.h>
+#include <CoreGraphics/CoreGraphics.h>
+#include <ImageIO/ImageIO.h>
 #include <mach/mach.h>
 #include <pthread.h>
 #include <signal.h>
@@ -918,6 +920,32 @@ static void install_progress(int step, double p, void *user) {
     else fprintf(stderr, "hengevm: install: step %d %d%%\n", step, pct);
 }
 
+/* HV_FB_SHOT=PNG (Linux guests): the framebuffer, written every 5 s. */
+static void *fb_shot_thread(void *arg) {
+    const char *path = arg;
+    for (;;) {
+        sleep(5);
+        HvBootDisplay d;
+        if (hv_vm_boot_display(&d) != 0) continue;
+        CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
+        CGContextRef ctx = CGBitmapContextCreate((void *)d.pixels, d.width, d.height, 8, d.stride, cs,
+                                                 kCGImageAlphaNoneSkipFirst | kCGBitmapByteOrder32Little);
+        CGImageRef img = ctx ? CGBitmapContextCreateImage(ctx) : NULL;
+        CFURLRef url = CFURLCreateFromFileSystemRepresentation(NULL, (const UInt8 *)path, (CFIndex)strlen(path), false);
+        CGImageDestinationRef dst = img ? CGImageDestinationCreateWithURL(url, CFSTR("public.png"), 1, NULL) : NULL;
+        if (dst) {
+            CGImageDestinationAddImage(dst, img, NULL);
+            CGImageDestinationFinalize(dst);
+            CFRelease(dst);
+        }
+        CFRelease(url);
+        if (img) CGImageRelease(img);
+        if (ctx) CGContextRelease(ctx);
+        CGColorSpaceRelease(cs);
+    }
+    return NULL;
+}
+
 /* --linux: the terminal is the guest's serial console. */
 static void *serial_stdin_thread(void *unused) {
     (void)unused;
@@ -1055,6 +1083,7 @@ int main(int argc, char **argv) {
     if (linux_kernel) {
         pthread_t st;
         pthread_create(&st, NULL, serial_stdin_thread, NULL);
+        if (getenv("HV_FB_SHOT")) pthread_create(&st, NULL, fb_shot_thread, getenv("HV_FB_SHOT"));
     }
     hv_vm_start(0, NULL); /* the other CPUs and the kicker; CPU 0 is cpu_thread, for --break */
     pthread_t t;
