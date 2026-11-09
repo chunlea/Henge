@@ -23,6 +23,9 @@ typedef struct HvVmConfig {
     /* JIT memory the host already has (iOS: granted by a debugger), or NULL to map it here. */
     void *jit_rx, *jit_rw;
     size_t jit_bytes;         /* 0: 768 MB */
+    /* A Linux guest instead of macOS (host/linux_boot.h): no ROM or aux then. */
+    const char *linux_kernel, *linux_initrd, *linux_cmdline;
+    uint32_t fb_width, fb_height;  /* its display; 0: 1280x800 */
 } HvVmConfig;
 
 /* Returns 0, or -1 with a reason in err. */
@@ -35,6 +38,7 @@ extern void (*hv_prof_register)(void); /* debugging: each thread that will run g
 void hv_vm_set_display_layer(void *layer);
 uint64_t hv_vm_gpu_frames(void);
 int hv_vm_ncpus(void);
+int hv_vm_is_linux(void);
 
 /* The boot framebuffer iBoot hands the kernel (XNU's boot_args video info):
    the Apple logo and progress bar while booting or installing, before a GPU

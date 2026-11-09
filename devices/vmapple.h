@@ -75,6 +75,10 @@ typedef struct HvVmapple {
     int ram_fd;              /* the file under guest RAM, kept open for the balloon's holes, or -1 */
     uint64_t panic_events;   /* last pvpanic event the guest reported */
     void (*poll)(void);      /* extra device work on the CPU thread each tick (Mac PVG) */
+    /* A Linux guest's display (host/linux_boot.c): a simple-framebuffer in the top of
+       guest RAM, left out of the memory the guest is told about. 0 for macOS. */
+    uint64_t fb_base, fb_size;
+    uint32_t fb_width, fb_height;
 } HvVmapple;
 
 /* Builds the machine around m and cfg->nr_cpus CPUs (cpus is an array of them). Disks may be NULL (no device then).

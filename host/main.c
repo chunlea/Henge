@@ -898,7 +898,8 @@ static void *cpu_thread(void *unused) {
 }
 
 static void usage(void) {
-    fprintf(stderr, "usage: hengevm --rom FILE --disk FILE --aux FILE --ecid N [--seed N] [--ram MB] [--log N] [--trace 1] [--screenshot PNG] [--watch VA] [--stats SECONDS [--profile 1]] [--cpus N] [--window] [--no-pvg] [--no-chain] [--break PC [--break-hits N]] [--dump PA LEN FILE] [--aux-offset BYTES] [--install IPSW]\n");
+    fprintf(stderr, "usage: hengevm --rom FILE --disk FILE --aux FILE --ecid N [--seed N] [--ram MB] [--log N] [--trace 1] [--screenshot PNG] [--watch VA] [--stats SECONDS [--profile 1]] [--cpus N] [--window] [--no-pvg] [--no-chain] [--break PC [--break-hits N]] [--dump PA LEN FILE] [--aux-offset BYTES] [--install IPSW]\n"
+                    "       hengevm --linux KERNEL [--initrd FILE] [--append CMDLINE] [--disk FILE] [--ram MB] [--cpus N] [--window]\n");
     exit(2);
 }
 
@@ -919,6 +920,7 @@ static void install_progress(int step, double p, void *user) {
 
 int main(int argc, char **argv) {
     const char *rom = NULL, *disk_path = NULL, *aux_path = NULL;
+    const char *linux_kernel = NULL, *linux_initrd = NULL, *linux_cmdline = NULL;
     uint64_t seed = 0, ecid = 0, ram_mb = 4096, aux_offset = 16384;
     const char *install_ipsw = NULL;
     const char *share_folder = NULL;
@@ -959,6 +961,9 @@ int main(int argc, char **argv) {
             if (sscanf(argv[++i], "%ux%u", &w, &h) == 2 && w && h) hv_pvg_lite_set_mode(w, h);
         }
         else if (!strcmp(argv[i], "--disk")) disk_path = argv[++i];
+        else if (!strcmp(argv[i], "--linux")) linux_kernel = argv[++i]; /* a Linux guest: kernel, UKI or zboot image */
+        else if (!strcmp(argv[i], "--initrd")) linux_initrd = argv[++i];
+        else if (!strcmp(argv[i], "--append")) linux_cmdline = argv[++i];
         else if (!strcmp(argv[i], "--aux")) aux_path = argv[++i];
         else if (!strcmp(argv[i], "--ecid")) ecid = strtoull(argv[++i], NULL, 0);
         else if (!strcmp(argv[i], "--ram")) ram_mb = strtoull(argv[++i], NULL, 0);
@@ -984,12 +989,13 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--install")) install_ipsw = argv[++i];
         else usage();
     }
-    if (!rom || !disk_path || !aux_path) usage();
+    if (!linux_kernel && (!rom || !disk_path || !aux_path)) usage();
     setvbuf(stderr, NULL, _IONBF, 0);
 
     HvVmConfig vc = {.rom = rom, .disk = disk_path, .aux = aux_path, .aux_offset = aux_offset, .ecid = ecid, .seed = seed,
                      .ram_mb = ram_mb, .ncpus = ncpus, .log = log, .no_net = getenv("HV_NO_NET") != NULL,
-                     .installer = install_ipsw != NULL};
+                     .installer = install_ipsw != NULL,
+                     .linux_kernel = linux_kernel, .linux_initrd = linux_initrd, .linux_cmdline = linux_cmdline};
     if (getenv("HV_JIT_MB")) vc.jit_bytes = (size_t)atoi(getenv("HV_JIT_MB")) << 20; /* debugging: a small region flushes often */
     hv_prof_register = hv_prof_register_thread;
     char err[256];

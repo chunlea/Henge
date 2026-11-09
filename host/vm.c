@@ -21,6 +21,7 @@
 #include "audio_mac.h"
 #include "dispatch.h"
 #include "net_slirp.h"
+#include "linux_boot.h"
 
 static HvMachine m;
 static HvCpu cpus[HV_MAX_CPUS]; /* the board takes them as an array */
@@ -44,7 +45,14 @@ int hv_vm_ncpus(void) { return ncpus; }
 /* arm64 boot_args: {u16 Revision, u16 Version, u64 virtBase, physBase, memSize,
    topOfKernelData, Video {baseAddr, display, rowBytes, width, height, depth}, ...}.
    Found by scanning page starts for one whose physBase is the RAM base. */
+int hv_vm_is_linux(void) { return board.fb_size != 0; }
+
 int hv_vm_boot_display(HvBootDisplay *d) {
+    if (board.fb_size) { /* Linux: its simple-framebuffer is the display */
+        d->pixels = board.ram + (board.fb_base - VMAPPLE_MEM);
+        d->width = board.fb_width, d->height = board.fb_height, d->stride = board.fb_width * 4;
+        return 0;
+    }
     /* What the guest's GPU has drawn, once it has drawn anything. */
     HvPvgLite *pvg = atomic_load_explicit(&display_pvg, memory_order_acquire);
     if (!pvg) return -1;
@@ -224,15 +232,18 @@ uint64_t hv_vm_gpu_frames(void) {
 }
 
 int hv_vm_create(const HvVmConfig *c, char *err, size_t errlen) {
-    if (!c->rom || !c->disk || !c->aux) return fail(err, errlen, "The ROM, disk and auxiliary storage are all needed.");
+    int linux_guest = c->linux_kernel != NULL;
+    if (!linux_guest && (!c->rom || !c->disk || !c->aux))
+        return fail(err, errlen, "The ROM, disk and auxiliary storage are all needed.");
     struct sigaction ill = {.sa_flags = SA_SIGINFO | SA_ONSTACK};
     ill.sa_sigaction = on_ill;
     sigaction(SIGILL, &ill, &prior_ill);
     sigaction(SIGBUS, &ill, &prior_bus);
     sigaction(SIGSEGV, &ill, &prior_segv);
     signal(SIGPIPE, SIG_IGN); /* a guest connection closing at the far end must not end the machine */
-    if (hv_disk_open(&disk, c->disk, 0, 0) != 0) return fail(err, errlen, "Cannot open the disk image.");
-    if (hv_disk_open(&aux, c->aux, c->aux_offset ? c->aux_offset : 16384, 0) != 0)
+    int have_disk = c->disk != NULL, have_aux = !linux_guest && c->aux;
+    if (have_disk && hv_disk_open(&disk, c->disk, 0, 0) != 0) return fail(err, errlen, "Cannot open the disk image.");
+    if (have_aux && hv_disk_open(&aux, c->aux, c->aux_offset ? c->aux_offset : 16384, 0) != 0)
         return fail(err, errlen, "Cannot open the auxiliary storage.");
     size_t jit = c->jit_bytes ? c->jit_bytes : (size_t)768 << 20;
     int r = c->jit_rx ? hv_machine_init_jit(&m, c->jit_rx, c->jit_rw, jit) : hv_machine_init(&m, jit);
@@ -250,10 +261,24 @@ int hv_vm_create(const HvVmConfig *c, char *err, size_t errlen) {
         cfg.run_installer1 = a, cfg.run_installer2 = b2;
     }
     static const uint8_t mac[6] = {0x02, 0x48, 0x56, 0x4d, 0x00, 0x01};
-    if (hv_vmapple_create(&board, &m, cpus, (c->ram_mb ? c->ram_mb : 2048) << 20, &disk, &aux, &cfg, mac) != 0)
+    if (hv_vmapple_create(&board, &m, cpus, (c->ram_mb ? c->ram_mb : 2048) << 20, have_disk ? &disk : NULL,
+                          have_aux ? &aux : NULL, &cfg, mac) != 0)
         return fail(err, errlen, "Cannot build the machine (not enough memory for the guest's RAM?).");
-    if (hv_vmapple_load_rom(&board, c->rom) != 0) return fail(err, errlen, "Cannot read the ROM (AVPBooter.vmapple2.bin).");
-    hv_vmapple_reset_cpu(&board);
+    if (linux_guest) {
+        /* The display: the top of RAM, 2 MB aligned, left out of the guest's memory node. */
+        board.fb_width = c->fb_width ? c->fb_width : 1280;
+        board.fb_height = c->fb_height ? c->fb_height : 800;
+        uint64_t fb = ((uint64_t)board.fb_width * board.fb_height * 4 + (2ull << 20) - 1) & ~((2ull << 20) - 1);
+        board.fb_size = fb;
+        board.fb_base = VMAPPLE_MEM + board.ram_size - fb;
+        hv_vmapple_reset_cpu(&board);
+        HvLinuxBoot lb = {.kernel = c->linux_kernel, .initrd = c->linux_initrd, .cmdline = c->linux_cmdline,
+                          .dtb_out = getenv("HV_DTB_OUT")};
+        if (hv_linux_load(&board, &lb, err, errlen) != 0) return -1;
+    } else {
+        if (hv_vmapple_load_rom(&board, c->rom) != 0) return fail(err, errlen, "Cannot read the ROM (AVPBooter.vmapple2.bin).");
+        hv_vmapple_reset_cpu(&board);
+    }
     if (board.net && !c->no_net) {
         if (hv_net_attach(&m, board.net) != 0) fprintf(stderr, "hengevm: user-mode network unavailable\n");
         else net_on = 1;
