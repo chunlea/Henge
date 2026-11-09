@@ -39,6 +39,10 @@ void hv_vm_set_display_layer(void *layer);
 uint64_t hv_vm_gpu_frames(void);
 int hv_vm_ncpus(void);
 int hv_vm_is_linux(void);
+/* The serial port (PL011): what the guest writes goes to out (on a CPU thread; NULL: stdout),
+   and hv_vm_serial_input queues bytes for it to read. Returns how many fit. */
+void hv_vm_set_serial_output(void (*out)(void *opaque, uint8_t c), void *opaque);
+size_t hv_vm_serial_input(const uint8_t *buf, size_t len);
 
 /* The boot framebuffer iBoot hands the kernel (XNU's boot_args video info):
    the Apple logo and progress bar while booting or installing, before a GPU

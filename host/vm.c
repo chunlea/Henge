@@ -47,6 +47,23 @@ int hv_vm_ncpus(void) { return ncpus; }
    Found by scanning page starts for one whose physBase is the RAM base. */
 int hv_vm_is_linux(void) { return board.fb_size != 0; }
 
+static void (*serial_out)(void *, uint8_t);
+static void *serial_out_opaque;
+
+void hv_vm_set_serial_output(void (*out)(void *opaque, uint8_t c), void *opaque) {
+    serial_out = out, serial_out_opaque = opaque;
+    if (board.uart && out) board.uart->output = out, board.uart->output_opaque = opaque;
+}
+
+size_t hv_vm_serial_input(const uint8_t *buf, size_t len) {
+    if (!board.uart) return 0;
+    size_t n = 0;
+    hv_dev_lock(&m);
+    while (n < len && hv_pl011_receive(board.uart, buf[n])) n++;
+    hv_dev_unlock(&m);
+    return n;
+}
+
 int hv_vm_boot_display(HvBootDisplay *d) {
     if (board.fb_size) { /* Linux: its simple-framebuffer is the display */
         d->pixels = board.ram + (board.fb_base - VMAPPLE_MEM);
@@ -275,6 +292,7 @@ int hv_vm_create(const HvVmConfig *c, char *err, size_t errlen) {
         HvLinuxBoot lb = {.kernel = c->linux_kernel, .initrd = c->linux_initrd, .cmdline = c->linux_cmdline,
                           .dtb_out = getenv("HV_DTB_OUT")};
         if (hv_linux_load(&board, &lb, err, errlen) != 0) return -1;
+        if (serial_out) board.uart->output = serial_out, board.uart->output_opaque = serial_out_opaque;
     } else {
         if (hv_vmapple_load_rom(&board, c->rom) != 0) return fail(err, errlen, "Cannot read the ROM (AVPBooter.vmapple2.bin).");
         hv_vmapple_reset_cpu(&board);

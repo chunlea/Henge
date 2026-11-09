@@ -918,6 +918,20 @@ static void install_progress(int step, double p, void *user) {
     else fprintf(stderr, "hengevm: install: step %d %d%%\n", step, pct);
 }
 
+/* --linux: the terminal is the guest's serial console. */
+static void *serial_stdin_thread(void *unused) {
+    (void)unused;
+    uint8_t buf[256];
+    ssize_t n;
+    while ((n = read(0, buf, sizeof buf)) > 0)
+        for (size_t at = 0; at < (size_t)n;) {
+            size_t took = hv_vm_serial_input(buf + at, (size_t)n - at);
+            at += took;
+            if (!took) usleep(2000);
+        }
+    return NULL;
+}
+
 int main(int argc, char **argv) {
     const char *rom = NULL, *disk_path = NULL, *aux_path = NULL;
     const char *linux_kernel = NULL, *linux_initrd = NULL, *linux_cmdline = NULL;
@@ -1038,6 +1052,10 @@ int main(int argc, char **argv) {
     if (pvg_on) hv_vm_set_poll(hv_pvg_poll);
     run_args = (RunArgs){brk, brk_hits, dump_pa, dump_len, dump_path};
     /* The CPU runs on its own thread: the graphics framework needs the main queue. */
+    if (linux_kernel) {
+        pthread_t st;
+        pthread_create(&st, NULL, serial_stdin_thread, NULL);
+    }
     hv_vm_start(0, NULL); /* the other CPUs and the kicker; CPU 0 is cpu_thread, for --break */
     pthread_t t;
     pthread_attr_t attr;
