@@ -1,49 +1,12 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "virtio_gpu.h"
+#include "virtio_gpu_priv.h"
+#include "virtio_gpu_virgl.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#define CONTROLQ 0
-#define CURSORQ 1
-
-/* Commands and responses (include/uapi/linux/virtio_gpu.h). */
-enum {
-    CMD_GET_DISPLAY_INFO = 0x0100,
-    CMD_RESOURCE_CREATE_2D,
-    CMD_RESOURCE_UNREF,
-    CMD_SET_SCANOUT,
-    CMD_RESOURCE_FLUSH,
-    CMD_TRANSFER_TO_HOST_2D,
-    CMD_RESOURCE_ATTACH_BACKING,
-    CMD_RESOURCE_DETACH_BACKING,
-    CMD_UPDATE_CURSOR = 0x0300,
-    CMD_MOVE_CURSOR,
-    RESP_OK_NODATA = 0x1100,
-    RESP_OK_DISPLAY_INFO,
-    RESP_ERR_UNSPEC = 0x1200,
-    RESP_ERR_OUT_OF_MEMORY,
-    RESP_ERR_INVALID_SCANOUT_ID,
-    RESP_ERR_INVALID_RESOURCE_ID,
-    RESP_ERR_INVALID_CONTEXT_ID,
-    RESP_ERR_INVALID_PARAMETER,
-};
-#define FLAG_FENCE 1u
-#define MAX_SCANOUTS 16
-
-/* Formats. */
-enum { B8G8R8A8 = 1, B8G8R8X8 = 2, A8R8G8B8 = 3, X8R8G8B8 = 4, R8G8B8A8 = 67, X8B8G8R8 = 68, A8B8G8R8 = 121, R8G8B8X8 = 134 };
-
-typedef struct Hdr {
-    uint32_t type, flags;
-    uint64_t fence_id;
-    uint32_t ctx_id;
-    uint8_t ring_idx, pad[3];
-} Hdr;
-_Static_assert(sizeof(Hdr) == 24, "virtio_gpu_ctrl_hdr");
-
-typedef struct Rect { uint32_t x, y, w, h; } Rect;
 
 struct HvGpuResource {
     uint32_t id, format, w, h;
@@ -81,17 +44,6 @@ static int read_backing(HvVirtioGpu *g, HvGpuResource *r, uint64_t off, uint8_t 
         dst += take, len -= take, off = 0;
     }
     return len ? -1 : 0;
-}
-
-/* One pixel of the resource's format as the display's B8G8R8X8. */
-static inline uint32_t to_display(uint32_t format, uint32_t p) {
-    switch (format) {
-    case B8G8R8A8: case B8G8R8X8: return p;                                     /* bytes B G R x: as it is */
-    case A8R8G8B8: case X8R8G8B8: return __builtin_bswap32(p);                  /* bytes x R G B */
-    case R8G8B8A8: case R8G8B8X8: return (p & 0xff00ff00u) | (p >> 16 & 0xff) | (p & 0xff) << 16; /* R G B x */
-    case A8B8G8R8: case X8B8G8R8: { uint32_t q = __builtin_bswap32(p); return (q & 0xff00ff00u) | (q >> 16 & 0xff) | (q & 0xff) << 16; }
-    default: return p;
-    }
 }
 
 static uint32_t cmd_transfer(HvVirtioGpu *g, const uint8_t *req) {
@@ -291,16 +243,28 @@ static void config_write(HvVirtio *v, uint32_t off, uint64_t val, unsigned size)
 HvVirtioGpu *hv_virtio_gpu_create(HvMachine *m, HvPcie *bus, uint32_t width, uint32_t height, uint32_t *display) {
     HvVirtioGpu *g = calloc(1, sizeof *g);
     HvVirtio *v = &g->vio;
-    hv_virtio_init(v, m, 16, 0x038000, 2, 0); /* display controller, other; VERSION_1 only: no virgl, no EDID */
+    g->m = m, g->width = width, g->height = height, g->display = display;
+    /* HV_VIRGL: a folder with virglrenderer and ANGLE's frameworks, for 3D. */
+    const char *dir = getenv("HV_VIRGL");
+    if (dir && *dir) {
+        g->virgl = hv_gpu_virgl_start(g, dir);
+        if (!g->virgl) fprintf(stderr, "hengevm: virtio-gpu: no 3D (%s), 2D only\n", dir);
+    }
+    /* display controller, other; VIRGL (bit 0) with 3D; no EDID */
+    hv_virtio_init(v, m, 16, 0x038000, 2, g->virgl ? 1 : 0);
     v->dev = g;
     v->notify = notify;
     v->config_write = config_write;
-    uint32_t cfg[4] = {0, 0, 1, 0}; /* events_read, events_clear, num_scanouts, num_capsets */
+    uint32_t cfg[4] = {0, 0, 1, g->virgl ? 2 : 0}; /* events_read, events_clear, num_scanouts, num_capsets (VIRGL, VIRGL2) */
     memcpy(v->config, cfg, sizeof cfg);
     v->config_len = 16;
-    g->m = m, g->width = width, g->height = height, g->display = display;
+    if (g->virgl) hv_gpu_virgl_attach(g->virgl);
     hv_pcie_attach(bus, &v->pci);
     return g;
+}
+
+void hv_virtio_gpu_poll(HvVirtioGpu *g) {
+    if (g) hv_gpu_virgl_poll(g->virgl);
 }
 
 void hv_virtio_gpu_compose(HvVirtioGpu *g, uint32_t *out) {

@@ -13,6 +13,7 @@
    them to host memory and a flush of the scanout's resource puts it on the
    display, which is a host buffer the app reads (hv_vm_boot_display). */
 typedef struct HvGpuResource HvGpuResource;
+typedef struct HvGpuVirgl HvGpuVirgl;
 
 typedef struct HvVirtioGpu {
     HvVirtio vio;
@@ -27,11 +28,14 @@ typedef struct HvVirtioGpu {
     uint32_t cursor[64 * 64];
     int cursor_on;
     int32_t cursor_x, cursor_y, hot_x, hot_y;
+    HvGpuVirgl *virgl;         /* 3D (virglrenderer), or NULL: 2D only */
 } HvVirtioGpu;
 
 /* display: where the picture goes, width * height 32-bit pixels. */
 HvVirtioGpu *hv_virtio_gpu_create(HvMachine *m, HvPcie *bus, uint32_t width, uint32_t height, uint32_t *display);
 /* The display with the cursor drawn on it, into out (width * height). */
 void hv_virtio_gpu_compose(HvVirtioGpu *g, uint32_t *out);
+/* CPU 0, device lock held: 3D requests that have finished go back to the guest. */
+void hv_virtio_gpu_poll(HvVirtioGpu *g);
 
 #endif
