@@ -1,0 +1,23 @@
+ios/Henge/EngineTuning.swift
+  s_862d92eac8a50c::t_335df3d4be3926 21-28,31
+ios/project.yml
+  s_862d92eac8a50c::t_023b02d971d306 137-154
+ios/scripts/fetch_virgl.sh
+  s_862d92eac8a50c::t_3b545fef16f6aa 1-32
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "451e19e5e297cb06f41254dc0074fa1e475205f6",
+  "prompts": {},
+  "sessions": {
+    "s_862d92eac8a50c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2a2ea67b-10a4-470a-aa9f-ca4aec62a749",
+        "model": "unknown"
+      },
+      "human_author": "chunli <git@chunli.dev>"
+    }
+  }
+}
