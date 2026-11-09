@@ -77,6 +77,7 @@ final class LinuxInstaller: NSObject, ObservableObject {
 
     func install(_ distro: LinuxDistribution, name: String, ramMB: Int) {
         guard !busy else { return }
+        phase = .finding // at once: busy from here, so a second tap (or the autopilot) sees it
         UIApplication.shared.isIdleTimerDisabled = true // a locked screen suspends the download
         grace = UIApplication.shared.beginBackgroundTask(withName: "Henge Linux install") {
             MainActor.assumeIsolated { LinuxInstaller.shared.endGrace() }
@@ -87,7 +88,6 @@ final class LinuxInstaller: NSObject, ObservableObject {
             mac.system = "linux"
             (mac.screenWidth, mac.screenHeight) = Device.linuxScreen
             do {
-                phase = .finding
                 let (tag, parts) = try await findParts(distro)
                 let download = parts.reduce(Int64(0)) { $0 + $1.bytes }
                 try checkSpace(download + distro.diskBytes)

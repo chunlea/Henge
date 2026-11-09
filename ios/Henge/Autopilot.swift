@@ -20,6 +20,8 @@ import UIKit
 ///   env NAME [VALUE]   set (or unset) an engine environment setting for the next Mac started
 ///   balloon MB         ask the Mac for that much of its memory back (HV_BALLOON set), log what it gave
 ///   snap [NAME]        the Mac's screen (1920x1080) into Documents/NAME.jpg (snap.jpg)
+///   linux-install [NAME]  install Omarchy (LinuxInstaller) as a new Linux machine, and wait until it is done
+///   serial TEXT        written to a running Linux machine's serial console, with a newline
 ///   log TEXT           a marker in henge.log
 ///   stop               stop the Mac
 ///   exit               quit Henge
@@ -139,6 +141,18 @@ enum Autopilot {
         case "balloon": // "balloon 2048": ask the Mac to hand 2 GB of its memory back (needs HV_BALLOON in henge-env.txt)
             let got = henge_vm_balloon(Int(arg) ?? -1)
             HengeLog.log("autopilot", got < 0 ? "no balloon (set HV_BALLOON in henge-env.txt)" : "balloon: the Mac has handed over \(got) MB")
+        case "linux-install":
+            let installer = LinuxInstaller.shared
+            installer.install(.omarchy, name: arg.isEmpty ? "Omarchy" : arg, ramMB: min(Device.suggestedRAMGB, 4) * 1024)
+            var last = ""
+            while installer.busy {
+                let now = "\(installer.phase) \(installer.received >> 20) MB, unpacked \(Int(installer.unpacked * 100))%"
+                if now != last, Int(Date().timeIntervalSince1970) % 15 == 0 { HengeLog.log("autopilot", now); last = now }
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+            }
+            HengeLog.log("autopilot", "linux-install: \(installer.phase)")
+        case "serial":
+            henge_vm_serial_write(arg + "\n")
         case "log": // already in the log; the wall clock too, to line it up with things measured elsewhere
             HengeLog.log("autopilot", String(format: "at %.3f", Date().timeIntervalSince1970))
         case "stop":
