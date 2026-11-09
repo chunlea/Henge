@@ -1,0 +1,31 @@
+Makefile
+  s_862d92eac8a50c::t_b473ca1e09562c 10,78
+devices/virtio_gpu.c
+  s_862d92eac8a50c::t_a6c4c31a20ae15 3-4,246-254,258,261,266-269
+devices/virtio_gpu.h
+  s_862d92eac8a50c::t_44c01509254e66 16,31,38-39
+devices/virtio_gpu_priv.h
+  s_862d92eac8a50c::t_2ab496404e9d60 1-71
+devices/virtio_gpu_virgl.h
+  s_862d92eac8a50c::t_231a95fb3d4702 1-15
+devices/vmapple.c
+  s_862d92eac8a50c::t_471f9fd82ee159 232
+devices/virtio_gpu_virgl.c
+  s_862d92eac8a50c::t_d94dcb6aea0728 1-616
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "83040dd60454fbf8b25470b47f2e7cced2a7f852",
+  "prompts": {},
+  "sessions": {
+    "s_862d92eac8a50c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2a2ea67b-10a4-470a-aa9f-ca4aec62a749",
+        "model": "unknown"
+      },
+      "human_author": "chunli <git@chunli.dev>"
+    }
+  }
+}
