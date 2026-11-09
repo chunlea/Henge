@@ -7,6 +7,7 @@
 #include <zlib.h>
 
 #include "fdt.h"
+#include "linux_disk.h"
 #include "timer.h"
 
 #define MB (1ull << 20)
@@ -276,8 +277,14 @@ static int put_ram(HvVmapple *b, uint64_t gpa, const void *data, size_t len) {
 
 int hv_linux_load(HvVmapple *b, const HvLinuxBoot *lb, char *err, size_t errlen) {
     size_t klen = 0;
-    uint8_t *file = read_file(lb->kernel, &klen);
-    if (!file) return fail(err, errlen, "Cannot read the Linux kernel.");
+    uint8_t *file;
+    HvLinuxDiskBoot db = {0};
+    if (lb->kernel) {
+        if (!(file = read_file(lb->kernel, &klen))) return fail(err, errlen, "Cannot read the Linux kernel.");
+    } else {
+        if (!lb->disk || hv_linux_disk_boot(lb->disk, &db, err, errlen) != 0) return lb->disk ? -1 : fail(err, errlen, "No kernel and no disk.");
+        file = db.kernel, klen = db.kernel_len, db.kernel = NULL;
+    }
 
     /* What a unified kernel image carries besides the kernel. */
     char *uki_cmdline = NULL;
@@ -290,6 +297,11 @@ int hv_linux_load(HvVmapple *b, const HvLinuxBoot *lb, char *err, size_t errlen)
     }
     if (!lb->initrd && (s = pe_section(file, klen, ".initrd", &sl)) && (uki_initrd = malloc(sl)))
         memcpy(uki_initrd, s, sl), uki_initrd_len = sl;
+    if (!lb->kernel) { /* the bootloader's initrd and command line win over a UKI's */
+        if (db.initrd) free(uki_initrd), uki_initrd = db.initrd, uki_initrd_len = db.initrd_len, db.initrd = NULL;
+        if (db.cmdline) free(uki_cmdline), uki_cmdline = db.cmdline, db.cmdline = NULL;
+    }
+    hv_linux_disk_boot_free(&db);
 
     uint8_t *img = to_image(file, &klen, 0);
     if (!img || klen < 64) {
@@ -310,11 +322,19 @@ int hv_linux_load(HvVmapple *b, const HvLinuxBoot *lb, char *err, size_t errlen)
 
     char *cmdline;
     if (lb->cmdline) cmdline = strdup(lb->cmdline);
+    else if (uki_cmdline && !lb->kernel) cmdline = strdup(uki_cmdline); /* the bootloader's, consoles already fixed */
     else if (uki_cmdline) {
         size_t n = strlen(uki_cmdline) + sizeof LINUX_CONSOLE + 2;
         if ((cmdline = malloc(n))) snprintf(cmdline, n, "%s %s", uki_cmdline, LINUX_CONSOLE);
     } else cmdline = strdup(LINUX_CONSOLE);
     free(uki_cmdline);
+    if (cmdline && lb->extra && *lb->extra) {
+        size_t n = strlen(cmdline) + strlen(lb->extra) + 2;
+        char *c2 = malloc(n);
+        if (c2) snprintf(c2, n, "%s %s", cmdline, lb->extra);
+        free(cmdline);
+        cmdline = c2;
+    }
 
     /* The tree in the last 2 MB of RAM (below the framebuffer, if any), the initrd under it. */
     uint64_t top = VMAPPLE_MEM + b->ram_size;

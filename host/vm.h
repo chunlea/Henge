@@ -25,6 +25,8 @@ typedef struct HvVmConfig {
     size_t jit_bytes;         /* 0: 768 MB */
     /* A Linux guest instead of macOS (host/linux_boot.h): no ROM or aux then. */
     const char *linux_kernel, *linux_initrd, *linux_cmdline;
+    int linux_from_disk;      /* Linux, booting what the disk's bootloader would (kernel NULL) */
+    const char *linux_extra;  /* appended to the kernel command line */
     uint32_t fb_width, fb_height;  /* its display; 0: 1280x800 */
 } HvVmConfig;
 

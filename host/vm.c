@@ -249,7 +249,7 @@ uint64_t hv_vm_gpu_frames(void) {
 }
 
 int hv_vm_create(const HvVmConfig *c, char *err, size_t errlen) {
-    int linux_guest = c->linux_kernel != NULL;
+    int linux_guest = c->linux_kernel != NULL || c->linux_from_disk;
     if (!linux_guest && (!c->rom || !c->disk || !c->aux))
         return fail(err, errlen, "The ROM, disk and auxiliary storage are all needed.");
     struct sigaction ill = {.sa_flags = SA_SIGINFO | SA_ONSTACK};
@@ -291,6 +291,7 @@ int hv_vm_create(const HvVmConfig *c, char *err, size_t errlen) {
         board.fb_base = VMAPPLE_MEM + board.ram_size - fb;
         hv_vmapple_reset_cpu(&board);
         HvLinuxBoot lb = {.kernel = c->linux_kernel, .initrd = c->linux_initrd, .cmdline = c->linux_cmdline,
+                          .disk = c->disk, .extra = c->linux_extra,
                           .dtb_out = getenv("HV_DTB_OUT")};
         if (hv_linux_load(&board, &lb, err, errlen) != 0) return -1;
         if (serial_out) board.uart->output = serial_out, board.uart->output_opaque = serial_out_opaque;

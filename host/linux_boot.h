@@ -14,11 +14,14 @@
 
    kernel: an arm64 Image, gzip'd or not, an EFI zboot image (what distributions
    ship as vmlinuz), or a unified kernel image (a PE with .linux, and optionally
-   .initrd and .cmdline, which is how Omarchy boots). */
+   .initrd and .cmdline). With no kernel, the disk's own boot entry (Limine's, as
+   Omarchy has it). */
 typedef struct HvLinuxBoot {
-    const char *kernel;
+    const char *kernel;   /* NULL: what the disk's bootloader would boot (host/linux_disk.h) */
+    const char *disk;     /* the root disk, for kernel == NULL */
     const char *initrd;   /* NULL: none, or the UKI's own */
-    const char *cmdline;  /* NULL: the UKI's own plus the serial console, or just the serial console */
+    const char *cmdline;  /* NULL: the UKI's or bootloader's own plus the serial console, or just the serial console */
+    const char *extra;    /* appended to the command line, whichever it is */
     const char *dtb_out;  /* debugging: also write the generated tree here */
 } HvLinuxBoot;
 
