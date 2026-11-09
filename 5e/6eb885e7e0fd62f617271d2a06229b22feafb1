@@ -1,0 +1,19 @@
+host/linux_image.c
+  s_862d92eac8a50c::t_0e37bfba1f4e1f 28-75,77-88,108,110-111,124,139,142-144,149-150
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "5e6eb885e7e0fd62f617271d2a06229b22feafb1",
+  "prompts": {},
+  "sessions": {
+    "s_862d92eac8a50c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2a2ea67b-10a4-470a-aa9f-ca4aec62a749",
+        "model": "unknown"
+      },
+      "human_author": "chunli <git@chunli.dev>"
+    }
+  }
+}
