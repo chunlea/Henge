@@ -1,0 +1,37 @@
+core/exception.c
+  s_862d92eac8a50c::t_fba8dc3dafe3fe 88-91,107
+devices/virtio_gpu.c
+  s_862d92eac8a50c::t_6f2b3d7891f144 138,245
+devices/virtio_gpu.h
+  s_862d92eac8a50c::t_000c17a29c9bd7 25
+host/vm.c
+  s_862d92eac8a50c::t_97b503d96f4b6e 254-255
+host/vm.h
+  s_862d92eac8a50c::t_9f56e914cbb6bf 58-60
+ios/Henge/BootDisplay.swift
+  s_862d92eac8a50c::t_64cefa80cfb31d 44-46,53-58
+ios/Henge/Hardware.swift
+  s_862d92eac8a50c::t_68698570ad3a5a 117-124
+ios/Henge/Input.swift
+  s_862d92eac8a50c::t_2b1c4470bf2f42 67-78
+ios/Henge/Native/henge-vm.c
+  s_862d92eac8a50c::t_2eb4bf28517419 76,226-227
+ios/Henge/Native/henge-vm.h
+  s_862d92eac8a50c::t_67091c8f86bc7a 87-88
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "cc994850f814e2060f4feb77134359b2acca5b9c",
+  "prompts": {},
+  "sessions": {
+    "s_862d92eac8a50c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2a2ea67b-10a4-470a-aa9f-ca4aec62a749",
+        "model": "unknown"
+      },
+      "human_author": "chunli <git@chunli.dev>"
+    }
+  }
+}
