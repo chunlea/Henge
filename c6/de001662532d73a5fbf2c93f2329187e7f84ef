@@ -1,0 +1,37 @@
+Makefile
+  s_862d92eac8a50c::t_06bdea2bfb0463 10
+devices/virtio_gpu.c
+  s_862d92eac8a50c::t_b281e4fa43a207 1-327
+devices/virtio_gpu.h
+  s_862d92eac8a50c::t_759d724c1d2f72 1-36
+devices/vmapple.c
+  s_862d92eac8a50c::t_45b4f1111d0b7c 313-315
+devices/vmapple.h
+  s_862d92eac8a50c::t_3868d428d5c049 21,83
+devices/xhci.c
+  s_862d92eac8a50c::t_0a343831f8dc3b 728-737
+devices/xhci.h
+  s_862d92eac8a50c::t_cee64bab644f8f 63-65
+host/linux_boot.c
+  s_862d92eac8a50c::t_bb2e9f0b9b1181 226
+host/main.c
+  s_862d92eac8a50c::t_e35667844b62fe 256,789,793,801
+host/vm.c
+  s_862d92eac8a50c::t_aab27d33697ba7 68,70-77,300-302,435-444,448-449,455,460-461
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "c6de001662532d73a5fbf2c93f2329187e7f84ef",
+  "prompts": {},
+  "sessions": {
+    "s_862d92eac8a50c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2a2ea67b-10a4-470a-aa9f-ca4aec62a749",
+        "model": "unknown"
+      },
+      "human_author": "chunli <git@chunli.dev>"
+    }
+  }
+}
