@@ -76,6 +76,15 @@ struct RootView: View {
             jit.enableAtLaunchIfAsked()
         }
         .onChange(of: jit.attachGeneration) { _ in JITBootstrap.prewarm() } // the built-in helper attached
+        .onReceive(NotificationCenter.default.publisher(for: Autopilot.showTab)) { note in
+            switch note.object as? String {
+            case "macs": tab = .macs
+            case "linux": tab = .linux
+            case "install": tab = .install
+            case "settings": tab = .settings
+            default: break
+            }
+        }
         .task { // testing only: HENGE_AUTOPILOT
             await Autopilot.run { mac in
                 // A session still on screen (its Mac stopped) is closed first: the same value again would start nothing.

@@ -21,12 +21,14 @@ import UIKit
 ///   balloon MB         ask the Mac for that much of its memory back (HV_BALLOON set), log what it gave
 ///   snap [NAME]        the Mac's screen (1920x1080) into Documents/NAME.jpg (snap.jpg)
 ///   linux-install [NAME]  install Omarchy (LinuxInstaller) as a new Linux machine, and wait until it is done
+///   tab NAME           show a tab: macs, linux, install, settings
 ///   serial TEXT        written to a running Linux machine's serial console, with a newline
 ///   log TEXT           a marker in henge.log
 ///   stop               stop the Mac
 ///   exit               quit Henge
 /// Each command is written to henge.log as it runs, so the log has the timeline.
 enum Autopilot {
+    static let showTab = Notification.Name("henge.autopilot.tab")
     private static let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
 
     /// Launched for testing: by environment, or by a one-time file (used up here).
@@ -151,6 +153,8 @@ enum Autopilot {
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
             }
             HengeLog.log("autopilot", "linux-install: \(installer.phase)")
+        case "tab":
+            NotificationCenter.default.post(name: Autopilot.showTab, object: arg.lowercased())
         case "serial":
             henge_vm_serial_write(arg + "\n")
         case "log": // already in the log; the wall clock too, to line it up with things measured elsewhere
