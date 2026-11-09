@@ -7,10 +7,10 @@
 struct HvMachine;
 
 /* One software TLB entry. host = guest VA + addend. The exec tag is the guest
-   VA of the 16 KB page. The read and write tags are that minus HV_TLB_ADJ, so
-   translated code checks "same page, and the access ends in it" for any access
-   of up to 16 bytes with one subtract and shift: VA - tag = offset + 15 must
-   be below 16 KB. (An access in a page's last 15 bytes takes the slow path.)
+   VA of the page (HV_TLB_PAGE_BITS: 16 KB, or 4 KB for Linux). The read and
+   write tags are that minus HV_TLB_ADJ, so translated code checks "same page,
+   and the access ends in it" for any access of up to 16 bytes with one
+   subtract and shift: VA - tag = offset + 15 must be below the page size. (An access in a page's last 15 bytes takes the slow path.)
    Invalid tags are HV_TLB_INVALID, which no address minus it brings near 0. */
 typedef struct HvTlbEntry {
     uint64_t read_tag;
@@ -25,7 +25,13 @@ static inline uint64_t hv_exec_key(uint64_t page_va, int64_t addend) {
     return page_va ^ ((uint64_t)addend >> 20 | (uint64_t)addend << 44);
 }
 
-#define HV_TLB_PAGE_BITS 14
+/* The TLB's page: 16 KB (14) for xnu, which maps everything in 16 KB pages; 4 KB (12) for
+   a Linux guest, whose 4 KB pages a 16 KB entry cannot hold (each access would take the slow
+   path). Chosen once per process, before the machine is made (hv_set_tlb_page_bits), and
+   baked into translated code. */
+extern int hv_tlb_page_bits;
+#define HV_TLB_PAGE_BITS hv_tlb_page_bits
+void hv_set_tlb_page_bits(int bits);
 #define HV_TLB_ADJ 15
 #define HV_TLB_INVALID 0x8080808080808080ull /* what memset(0x80) leaves */
 #define HV_TLB_BITS 14 /* 16384 entries per EL: 256 MB of 16 KB pages (xnu's working set overflowed 64 MB) */

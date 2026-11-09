@@ -57,6 +57,8 @@ void hv_ijc_drop_asid(HvCpu *cpu, uint16_t asid);
 void hv_ijc_switch(HvCpu *cpu);
 void hv_tlb_flush_va_asid(HvCpu *cpu, uint64_t va, int asid); /* asid -1: every address space */
 void hv_tlb_flush_va_page(HvCpu *cpu, uint64_t va, int asid);
+/* log2 of the page size the guest's translation regime uses for va (TCR_EL1.TG0 or TG1). */
+int hv_mmu_granule_bits(const HvCpu *cpu, uint64_t va);
 int hv_tlb_check_all(HvCpu *cpu); /* one page: stashes lose only its entries */
 void hv_ijc_drop_va(HvCpu *cpu, uint64_t va, int asid);
 /* Translated code's TLB miss: walk and fill without the full helper (see mmu.c). */

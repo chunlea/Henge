@@ -375,7 +375,11 @@ void hv_tlbi_apply(HvCpu *cpu, uint32_t op1, uint32_t crn, uint32_t crm, uint32_
     if (by_va) {
         uint64_t va = (uint64_t)((int64_t)((xt & 0xfffffffffffull) << 20) >> 8);
         int all_asids = op2 == 3 || op2 == 7; /* VAAE1, VAALE1 */
-        hv_tlb_flush_va_page(cpu, va, all_asids ? -1 : (int)(xt >> 48));
+        /* The guest's page: one of the TLB's, or (a granule bigger than the TLB's pages) several. */
+        int gb = hv_mmu_granule_bits(cpu, va);
+        uint64_t first = gb > HV_TLB_PAGE_BITS ? va & ~((1ull << gb) - 1) : va;
+        uint64_t n = gb > HV_TLB_PAGE_BITS ? 1ull << (gb - HV_TLB_PAGE_BITS) : 1;
+        for (uint64_t i = 0; i < n; i++) hv_tlb_flush_va_page(cpu, first + (i << HV_TLB_PAGE_BITS), all_asids ? -1 : (int)(xt >> 48));
     } else if (by_asid) {
         hv_tlb_flush_user(cpu);
         hv_tlb_stash_drop(cpu, (int)(xt >> 48));
@@ -496,13 +500,17 @@ int hv_sysreg_sys(HvCpu *cpu, uint32_t insn, uint64_t pc) {
             /* A small range (RVAE1IS and kin): page by page, the same way. */
             uint64_t npages = 0;
             int by_range = crn == 8 && op1 == 0 && (crm == 2 || crm == 5) && (op2 & 1);
-            if (by_range && ((xt >> 46) & 3) == 2) { /* 16 KB granule, as xnu uses */
+            uint32_t tg = (xt >> 46) & 3;
+            if (by_range && (tg == 1 ? 12 : tg == 2 ? 14 : tg == 3 ? 16 : 0) == HV_TLB_PAGE_BITS) {
+                /* granules the size of the TLB's pages: 16 KB as xnu uses, or Linux's 4 KB */
                 npages = (((xt >> 39) & 31) + 1) << (5 * ((xt >> 44) & 3) + 1);
-                va = (uint64_t)((int64_t)((xt & 0x1fffffffffull) << (64 - 37)) >> (64 - 37 - 14));
+                va = (uint64_t)((int64_t)((xt & 0x1fffffffffull) << (64 - 37)) >> (64 - 37 - HV_TLB_PAGE_BITS));
                 /* HV_RANGE_DROP=N: ranges up to N pages are done from here too, in one pass (hv_tlbi_drop_remote_range) */
                 if (npages > (hv_knob[HV_K_RANGEDROP] > 32 ? (uint64_t)hv_knob[HV_K_RANGEDROP] : 32)) npages = 0;
             } else if (by_va) {
-                npages = 1;
+                int gb = hv_mmu_granule_bits(cpu, va); /* a granule bigger than the TLB's pages is several of them */
+                if (gb > HV_TLB_PAGE_BITS) va &= ~((1ull << gb) - 1), npages = 1ull << (gb - HV_TLB_PAGE_BITS);
+                else npages = 1;
             }
             uint64_t seq[HV_MAX_CPUS] = {0};
             for (int i = 0; i < m->ncpus; i++) {

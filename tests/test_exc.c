@@ -48,6 +48,7 @@ static int run(const TestProgram *p, HvCpu *cpu, uint64_t x9) {
 #define ADDR(sym) ((uint64_t)(uintptr_t)(sym))
 
 int main(void) {
+    if (getenv("HV_TLB_PAGE_BITS")) hv_set_tlb_page_bits(atoi(getenv("HV_TLB_PAGE_BITS"))); /* 12: as for a Linux guest */
     setvbuf(stdout, NULL, _IONBF, 0);
     hv_machine_init(&m, 4 << 20);
     stack = aligned_alloc(16384, 65536);

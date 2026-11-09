@@ -22,6 +22,7 @@ static const TestProgram programs[] = {
 };
 
 int main(void) {
+    if (getenv("HV_TLB_PAGE_BITS")) hv_set_tlb_page_bits(atoi(getenv("HV_TLB_PAGE_BITS"))); /* 12: as for a Linux guest */
     setvbuf(stdout, NULL, _IONBF, 0);
     static HvMachine m;
     if (hv_machine_init(&m, 4 << 20) != 0) {

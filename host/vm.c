@@ -271,6 +271,10 @@ int hv_vm_create(const HvVmConfig *c, char *err, size_t errlen) {
     if (have_aux && hv_disk_open(&aux, c->aux, c->aux_offset ? c->aux_offset : 16384, 0) != 0)
         return fail(err, errlen, "Cannot open the auxiliary storage.");
     size_t jit = c->jit_bytes ? c->jit_bytes : (size_t)768 << 20;
+    /* A Linux guest maps its memory in 4 KB pages, which a 16 KB TLB entry cannot hold: its TLB holds 4 KB pages.
+       HV_TLB_PAGE_BITS (12 or 14) overrides, for measuring. */
+    const char *tpb = getenv("HV_TLB_PAGE_BITS");
+    hv_set_tlb_page_bits(tpb && (atoi(tpb) == 12 || atoi(tpb) == 14) ? atoi(tpb) : linux_guest ? 12 : 14);
     int r = c->jit_rx ? hv_machine_init_jit(&m, c->jit_rx, c->jit_rw, jit) : hv_machine_init(&m, jit);
     if (r != 0) return fail(err, errlen, "Cannot set up the JIT region.");
     m.log = c->log;

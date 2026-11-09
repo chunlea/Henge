@@ -1072,11 +1072,12 @@ static void translate_mem(Emit *e, uint32_t insn, uint64_t pc) {
     put(e, LDR_X(U, T, tlb + (op.store ? 8 : 0)));
     put(e, SUB_X(U, addr, U));
     if (op.align && op.bytes > 1) {
-        /* and U, U, #~(0x3fff & ~(bytes-1)) after taking the adjustment back off:
-           zero only if same page and aligned */
-        uint32_t k = __builtin_ctz(op.bytes);
+        /* and U, U, #~(page mask & ~(bytes-1)) after taking the adjustment back off:
+           zero only if same page and aligned. The mask is 64 - P + k ones from bit P
+           round to bit k - 1: immr 64 - P, imms 63 - P + k. */
+        uint32_t k = __builtin_ctz(op.bytes), pb = (uint32_t)HV_TLB_PAGE_BITS;
         put(e, 0xd1000000u | HV_TLB_ADJ << 10 | U << 5 | U); /* sub U, U, #ADJ */
-        put(e, 0x92400000u | 50u << 16 | (49u + k) << 10 | U << 5 | U);
+        put(e, 0x92400000u | (64u - pb) << 16 | (63u - pb + k) << 10 | U << 5 | U);
     } else {
         if (op.bytes > HV_TLB_ADJ + 1) put_add_imm(e, U, U, op.bytes - 1 - HV_TLB_ADJ);
         put(e, UBFM_X(U, U, HV_TLB_PAGE_BITS, 63));

@@ -160,6 +160,7 @@ static int test_mmio(HvMachine *m) {
 }
 
 int main(void) {
+    if (getenv("HV_TLB_PAGE_BITS")) hv_set_tlb_page_bits(atoi(getenv("HV_TLB_PAGE_BITS"))); /* 12: as for a Linux guest */
     setenv("HV_GROUPS", "1", 0); /* grouped accesses are off by default: test them here */
     setvbuf(stdout, NULL, _IONBF, 0);
     static HvMachine m;

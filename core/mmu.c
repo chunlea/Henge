@@ -17,6 +17,11 @@ static int granule_bits(uint32_t tg, int ttbr1) {
     return tg == 2 ? 14 : tg == 1 ? 16 : 12;            /* TG0: 00 4K, 01 64K, 10 16K */
 }
 
+int hv_mmu_granule_bits(const HvCpu *cpu, uint64_t va) {
+    int hi = (va >> 55) & 1;
+    return granule_bits(hi ? (cpu->tcr_el1 >> 30) & 3 : (cpu->tcr_el1 >> 14) & 3, hi);
+}
+
 /* This file is built with -mgeneral-regs-only, and the walk and the TLB fill
    call nothing in libc: hv_tlb_refill runs them from translated code without
    saving the guest's SIMD registers, which libc's memory routines would use. */
