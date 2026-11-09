@@ -1,0 +1,23 @@
+host/main.c
+  s_32f19243a47117::t_d3e20f67ff29fd 921-934,1055-1058
+host/vm.c
+  s_32f19243a47117::t_291dc8d79b5761 50-66,295
+host/vm.h
+  s_32f19243a47117::t_e22573b16ec36b 42-45
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "08992c16b8d326f956f0d9825deaf8bfa0911da6",
+  "prompts": {},
+  "sessions": {
+    "s_32f19243a47117": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c78fdbf0-4bf9-482f-ba49-81423cae2bbd",
+        "model": "unknown"
+      },
+      "human_author": "chunli <git@chunli.dev>"
+    }
+  }
+}
