@@ -65,8 +65,16 @@ size_t hv_vm_serial_input(const uint8_t *buf, size_t len) {
 }
 
 int hv_vm_boot_display(HvBootDisplay *d) {
-    if (board.fb_size) { /* Linux: its simple-framebuffer is the display */
+    if (board.fb_size) { /* Linux: its simple-framebuffer, or what virtio-gpu put there with the cursor drawn on */
         d->pixels = board.ram + (board.fb_base - VMAPPLE_MEM);
+        if (board.gpu) {
+            static uint32_t *composed;
+            if (!composed) composed = malloc((size_t)board.fb_width * board.fb_height * 4);
+            if (composed) {
+                hv_virtio_gpu_compose(board.gpu, composed);
+                d->pixels = (const uint8_t *)composed;
+            }
+        }
         d->width = board.fb_width, d->height = board.fb_height, d->stride = board.fb_width * 4;
         return 0;
     }
@@ -289,6 +297,9 @@ int hv_vm_create(const HvVmConfig *c, char *err, size_t errlen) {
         uint64_t fb = ((uint64_t)board.fb_width * board.fb_height * 4 + (2ull << 20) - 1) & ~((2ull << 20) - 1);
         board.fb_size = fb;
         board.fb_base = VMAPPLE_MEM + board.ram_size - fb;
+        if (!getenv("HV_LINUX_SIMPLEFB"))
+            board.gpu = hv_virtio_gpu_create(&m, board.pcie, board.fb_width, board.fb_height,
+                                             (uint32_t *)(void *)(board.ram + (board.fb_base - VMAPPLE_MEM)));
         hv_vmapple_reset_cpu(&board);
         HvLinuxBoot lb = {.kernel = c->linux_kernel, .initrd = c->linux_initrd, .cmdline = c->linux_cmdline,
                           .disk = c->disk, .extra = c->linux_extra,
@@ -421,21 +432,33 @@ static dispatch_queue_t pointer_queue(void) {
     return q;
 }
 
+/* A Linux guest has no USB controller (its xHCI driver and devices/xhci.c, written for macOS, corrupt its
+   memory), so its keys go to the virtio keyboard instead. */
+static void key_linux(uint16_t code, int down) {
+    if (board.usb) hv_xhci_key_linux(board.usb, code, down);
+    else if (board.keyboard && code) {
+        hv_virtio_input_send(board.keyboard, HV_EV_KEY, code, down);
+        hv_virtio_input_send(board.keyboard, HV_EV_SYN, 0, 0);
+    }
+}
+
 static void rctrl_hold(int *owner, int down) {
     os_unfair_lock_lock(&rctrl_lock);
     *owner = down;
-    hv_xhci_key(board.usb, HID_RIGHT_CONTROL, rctrl_user || rctrl_click);
+    if (board.usb) hv_xhci_key(board.usb, HID_RIGHT_CONTROL, rctrl_user || rctrl_click);
+    else key_linux(LINUX_KEY_RIGHTCTRL, rctrl_user || rctrl_click);
     os_unfair_lock_unlock(&rctrl_lock);
 }
 
 void hv_vm_key(uint16_t code, int down) {
     if (code == LINUX_KEY_RIGHTCTRL) rctrl_hold(&rctrl_user, down);
-    else hv_xhci_key_linux(board.usb, code, down);
+    else key_linux(code, down);
 }
 
 void hv_vm_key_hid(uint8_t usage, int down) {
     if (usage == HID_RIGHT_CONTROL) rctrl_hold(&rctrl_user, down);
-    else hv_xhci_key(board.usb, usage, down);
+    else if (board.usb) hv_xhci_key(board.usb, usage, down);
+    else key_linux(hv_hid_to_linux(usage), down);
 }
 
 static void move_now(void *ctx) {

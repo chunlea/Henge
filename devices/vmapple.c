@@ -310,7 +310,9 @@ int hv_vmapple_create(HvVmapple *b, HvMachine *m, HvCpu *cpu, uint64_t ram_size,
     if (aux) b->aux_blk = hv_virtio_blk_create(m, b->pcie, aux, HV_VBLK_AUX);
     if (root) b->root_blk = hv_virtio_blk_create(m, b->pcie, root, cfg->linux_guest ? HV_VBLK_PLAIN : HV_VBLK_ROOT);
     if (mac) b->net = hv_virtio_net_create(m, b->pcie, mac);
-    b->usb = hv_xhci_create(m, b->pcie);
+    /* Not for Linux: its xHCI driver and this controller (written for macOS) corrupt its memory; its keys go to
+       the virtio keyboard (host/vm.c). HV_NO_XHCI: none for macOS either (debugging). */
+    if (!cfg->linux_guest && !getenv("HV_NO_XHCI")) b->usb = hv_xhci_create(m, b->pcie);
     /* HV_INPUT_ORDER (experiment): "keyboard" = keyboard only, "swap" = mouse first. */
     const char *order = getenv("HV_INPUT_ORDER");
     if (order && !strcmp(order, "swap")) b->mouse = hv_virtio_input_create(m, b->pcie, HV_VINPUT_MOUSE);

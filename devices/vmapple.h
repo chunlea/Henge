@@ -18,6 +18,7 @@
 #include "virtio_net.h"
 #include "virtio_snd.h"
 #include "virtio_balloon.h"
+#include "virtio_gpu.h"
 
 /* The virtual Mac: QEMU's vmapple memory map and interrupt numbers (hw/vmapple/vmapple.c). */
 #define VMAPPLE_FIRMWARE   0x00100000ull /* 1 MB: the boot ROM */
@@ -79,6 +80,7 @@ typedef struct HvVmapple {
        guest RAM, left out of the memory the guest is told about. 0 for macOS. */
     uint64_t fb_base, fb_size;
     uint32_t fb_width, fb_height;
+    HvVirtioGpu *gpu;        /* Linux's display, drawing into the framebuffer memory (NULL: a simple-framebuffer there) */
 } HvVmapple;
 
 /* Builds the machine around m and cfg->nr_cpus CPUs (cpus is an array of them). Disks may be NULL (no device then).

@@ -725,6 +725,16 @@ static const uint8_t linux_to_hid[256] = {
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 };
 
+uint16_t hv_hid_to_linux(uint8_t usage) {
+    static uint16_t table[256];
+    static int made;
+    if (!made) { /* the same mapping, the other way: the first Linux code for each usage */
+        for (int c = 255; c > 0; c--) if (linux_to_hid[c]) table[linux_to_hid[c]] = (uint16_t)c;
+        made = 1;
+    }
+    return table[usage];
+}
+
 void hv_xhci_key_linux(HvXhci *x, uint16_t code, int down) {
     if (code < 256) hv_xhci_key(x, linux_to_hid[code], down);
 }

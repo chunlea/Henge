@@ -60,4 +60,7 @@ void hv_xhci_key_linux(HvXhci *x, uint16_t code, int down);
 /* CPU thread: hand waiting reports to the guest. */
 void hv_xhci_poll(HvXhci *x);
 
+/* A HID keyboard usage as a Linux key code (0 if none). */
+uint16_t hv_hid_to_linux(uint8_t usage);
+
 #endif

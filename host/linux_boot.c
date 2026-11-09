@@ -223,7 +223,7 @@ unsigned char *hv_linux_make_dtb(const HvVmapple *b, const char *cmdline, unsign
     hv_fdt_prop_str(&f, "clock-names", "apb_pclk");
     hv_fdt_end(&f);
 
-    if (b->fb_size) {
+    if (b->fb_size && !b->gpu) { /* with virtio-gpu, a second card would only compete with it */
         snprintf(name, sizeof name, "framebuffer@%llx", (unsigned long long)b->fb_base);
         hv_fdt_begin(&f, name);
         hv_fdt_prop_str(&f, "compatible", "simple-framebuffer");

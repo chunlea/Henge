@@ -253,7 +253,7 @@ static void click_here(void) {
 }
 
 static void key_event(int code, int down) {
-    hv_xhci_key_linux(board.usb, (uint16_t)code, down);
+    hv_vm_key((uint16_t)code, down);
     hv_virtio_input_send(board.keyboard, HV_EV_KEY, (uint16_t)code, down);
     hv_virtio_input_send(board.keyboard, HV_EV_SYN, 0, 0);
 }
@@ -786,11 +786,11 @@ static void *type_thread(void *unused) {
     }
     static const uint16_t keys[3] = {30, 48, 46}; /* a, b, c */
     for (int i = 0; i < 3; i++) {
-        hv_xhci_key_linux(board.usb, keys[i], 1);
+        hv_vm_key(keys[i], 1);
         hv_virtio_input_send(board.keyboard, HV_EV_KEY, keys[i], 1);
         hv_virtio_input_send(board.keyboard, HV_EV_SYN, 0, 0);
         usleep(100000);
-        hv_xhci_key_linux(board.usb, keys[i], 0);
+        hv_vm_key(keys[i], 0);
         hv_virtio_input_send(board.keyboard, HV_EV_KEY, keys[i], 0);
         hv_virtio_input_send(board.keyboard, HV_EV_SYN, 0, 0);
         usleep(700000);
@@ -798,7 +798,7 @@ static void *type_thread(void *unused) {
     for (int i = 0; i < 10; i++) {
         sleep(2);
         fprintf(stderr, "hengevm: typed abc: usb delivered %llu reports, keyboard delivered %llu of 12 events, mouse %llu\n",
-                (unsigned long long)board.usb->delivered, (unsigned long long)board.keyboard->delivered, board.mouse ? (unsigned long long)board.mouse->delivered : 0ull);
+                board.usb ? (unsigned long long)board.usb->delivered : 0ull, (unsigned long long)board.keyboard->delivered, board.mouse ? (unsigned long long)board.mouse->delivered : 0ull);
     }
     return NULL;
 }
