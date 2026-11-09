@@ -1,0 +1,31 @@
+ios/Henge/Hardware.swift
+  s_862d92eac8a50c::t_216004e48eea4f 19-26
+ios/Henge/Machines.swift
+  s_862d92eac8a50c::t_ed6e265000b46d 25-29,55,57,117-118
+ios/Henge/HengeApp.swift
+  s_862d92eac8a50c::t_b70bb12fbaf75b 39,53-55
+ios/Henge/HomeView.swift
+  s_862d92eac8a50c::t_5f1bac9985bcd0 16-18,20-21,109
+ios/Henge/LinuxInstaller.swift
+  s_862d92eac8a50c::t_3cc4f9adfb7e0f 1-272
+ios/Henge/LinuxView.swift
+  s_862d92eac8a50c::t_2f9261f5bd40f5 1-282
+ios/Henge/SessionView.swift
+  s_862d92eac8a50c::t_c5556292b303cd 564-572
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "dff894ea231bd02683d6fbe2346d231d3b2eb6e9",
+  "prompts": {},
+  "sessions": {
+    "s_862d92eac8a50c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2a2ea67b-10a4-470a-aa9f-ca4aec62a749",
+        "model": "unknown"
+      },
+      "human_author": "chunli <git@chunli.dev>"
+    }
+  }
+}
