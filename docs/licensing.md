@@ -15,6 +15,7 @@ the App Store.
 | libimobiledevice, libplist | LGPL-2.1, with GPL-2.0 for their tools | `third_party/` |
 | libimobiledevice-glue, libirecovery, libtatsu, libusbmuxd | LGPL-2.1 | `third_party/` |
 | libzip | BSD | `third_party/libzip` |
+| Zstandard 1.5.7, its decoder only (unpacking Linux disk images) | BSD | `third_party/zstd` |
 | Mbed TLS | Apache-2.0 or GPL-2.0-or-later | `third_party/mbedtls` |
 | StikJIT (the Bitrise build applies `ci/stikjit-high-address.patch`) | MPL-2.0 | `ios/Henge/Resources/legal/` |
 | idevice | MIT | `ios/Henge/Resources/legal/` |

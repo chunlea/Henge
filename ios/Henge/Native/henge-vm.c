@@ -15,6 +15,8 @@
 #include "dns_proxy.h"
 #include "vm.h"
 #include "install.h"
+#include "linux_disk.h"
+#include "linux_image.h"
 
 #include <fcntl.h>
 #include <unistd.h>
@@ -51,6 +53,52 @@ int henge_vm_boot(const char *rom, const char *disk, const char *aux, uint64_t e
     state = 1;
     hv_vm_start(1, on_exit);
     return 0;
+}
+
+int henge_vm_boot_linux(const char *disk, uint64_t ram_mb, int cpus, uint32_t width, uint32_t height, const char *extra,
+                        char *err, size_t errlen) {
+    { extern void hv_prof_ios_start(void); hv_prof_ios_start(); }
+    if (state) {
+        snprintf(err, errlen, "A machine has already run in this session. Quit Henge and open it again to start another.");
+        return -1;
+    }
+    HengeDualMapping *jit = henge_ios_jit_get_mapping();
+    if (!jit || !jit->rw_addr) {
+        snprintf(err, errlen, "Henge has no JIT region. Turn on JIT first.");
+        return -1;
+    }
+    HvVmConfig c = {.disk = disk, .ram_mb = ram_mb, .ncpus = cpus, .log = 1, .linux_from_disk = 1, .linux_extra = extra,
+                    .fb_width = width, .fb_height = height,
+                    .jit_rx = jit->rx_addr, .jit_rw = jit->rw_addr, .jit_bytes = jit->size};
+    fprintf(stderr, "henge: booting Linux with %d CPUs, %llu MB RAM, a %ux%u screen, a %zu MB JIT region\n", cpus,
+            (unsigned long long)ram_mb, width, height, jit->size >> 20);
+    if (hv_vm_create(&c, err, errlen) != 0) return -1;
+    state = 1;
+    hv_vm_start(1, on_exit);
+    return 0;
+}
+
+static volatile double unpack_progress;
+static void on_unpack(uint64_t done, uint64_t total, void *user) {
+    (void)user;
+    unpack_progress = total ? (double)done / (double)total : 0;
+}
+int henge_linux_unpack(const char *const *parts, int nparts, const char *disk, char *err, size_t errlen) {
+    unpack_progress = 0;
+    return hv_linux_image_unpack(parts, nparts, disk, 1, on_unpack, NULL, err, errlen);
+}
+double henge_linux_unpack_progress(void) { return unpack_progress; }
+
+int henge_linux_disk_bootable(const char *disk) {
+    HvLinuxDiskBoot b;
+    char err[256];
+    if (hv_linux_disk_boot(disk, &b, err, sizeof err) != 0) return 0;
+    hv_linux_disk_boot_free(&b);
+    return 1;
+}
+
+void henge_vm_serial_write(const char *text) {
+    if (state == 1 && text) hv_vm_serial_input((const uint8_t *)text, strlen(text));
 }
 
 static volatile int install_step = -1;

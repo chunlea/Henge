@@ -511,6 +511,15 @@ int hv_vm_pointer(int *x, int *y) {
 }
 
 int hv_vm_snapshot(uint8_t *bgra, int width, int height) {
+    if (board.fb_size && width > 0 && height > 0) { /* Linux: its framebuffer, scaled (nearest) */
+        const uint32_t *src = (const uint32_t *)(const void *)(board.ram + (board.fb_base - VMAPPLE_MEM));
+        uint32_t *dst = (uint32_t *)(void *)bgra;
+        for (int y = 0; y < height; y++) {
+            const uint32_t *row = src + (uint64_t)((uint64_t)y * board.fb_height / (uint64_t)height) * board.fb_width;
+            for (int x = 0; x < width; x++) dst[y * width + x] = row[(uint64_t)x * board.fb_width / (uint64_t)width] | 0xff000000u;
+        }
+        return 0;
+    }
     HvPvgLite *pvg = atomic_load_explicit(&display_pvg, memory_order_acquire);
     if (!pvg || width <= 0 || height <= 0) return -1;
     return hv_pvg_lite_snapshot(pvg, bgra, (uint32_t)width, (uint32_t)height);

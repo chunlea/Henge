@@ -14,7 +14,7 @@ METAL_LIBS = -framework Foundation -framework QuartzCore -framework Metal -frame
 TESTS = $(B)/test_classify $(B)/test_jit_region $(B)/test_operands $(B)/test_jit $(B)/test_mem \
         $(B)/test_mmu $(B)/test_exc $(B)/test_devices
 
-all: $(TESTS) $(B)/hengevm $(B)/hengevm-ref $(B)/hvsparse
+all: $(TESTS) $(B)/hengevm $(B)/hengevm-ref $(B)/hvsparse $(B)/hvlinux-unpack
 
 # Mac-only test tool: the same machine with the CPU on Hypervisor.framework, for comparing runs.
 $(B)/hengevm-ref: host/hvf_ref.c host/hvf_ref.entitlements $(ENGINE) $(DEV)
@@ -28,6 +28,18 @@ $(B)/pvg_metal.o: devices/pvg_metal.m devices/*.h core/*.h host/*.h | $(B)
 	$(CC) $(CFLAGS) -fobjc-arc -Wno-unused-parameter -Wno-deprecated-declarations -c $< -o $@
 $(B)/pvg_mac.o: devices/pvg_mac.m devices/*.h core/*.h host/*.h | $(B)
 	$(CC) -fobjc-arc -O2 -g -Wall -mmacosx-version-min=15.2 -Icore -Ihost -Idevices -c $< -o $@
+
+# Zstandard's decoder (third_party/zstd, BSD): unpacking Linux disk images (host/linux_image.c).
+ZSTD_SRC = $(wildcard third_party/zstd/common/*.c third_party/zstd/decompress/*.c)
+ZSTD_FLAGS = -O2 -w -DZSTD_DISABLE_ASM -DZSTD_LEGACY_SUPPORT=0 -DZSTD_NO_TRACE -Ithird_party/zstd -Ithird_party/zstd/common
+ZSTD_OBJ = $(patsubst third_party/zstd/%.c,$(B)/zstd/%.o,$(ZSTD_SRC))
+$(B)/zstd/%.o: third_party/zstd/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(ZSTD_FLAGS) -c $< -o $@
+$(B)/linux_image.o: host/linux_image.c host/linux_image.h | $(B)
+	$(CC) $(CFLAGS) -Ithird_party/zstd -c $< -o $@
+$(B)/hvlinux-unpack: tools/hvlinux_unpack.c $(B)/linux_image.o $(ZSTD_OBJ)
+	$(CC) $(CFLAGS) $^ -o $@
 
 # User-mode NAT for the NIC: Homebrew's libslirp (brew install libslirp).
 SLIRP_CFLAGS = $(shell pkg-config --cflags slirp)
@@ -113,12 +125,15 @@ IOS_SDK = $(shell xcrun --sdk iphoneos --show-sdk-path)
 IOS_CC = xcrun --sdk iphoneos clang -arch arm64 -miphoneos-version-min=17.0 -isysroot $(IOS_SDK)
 # ios/deps/include/slirp first when it holds libslirp's headers (they are all the engine takes from there).
 IOS_DEPS ?= $(if $(wildcard ios/deps/include/slirp/libslirp.h),$(CURDIR)/ios/deps,$(HOME)/Documents/Coding/Husk/build/ios-arm64/sysroot)
-IOS_CFLAGS = -std=c11 -Wall -Wextra -O2 -g -Icore -Ihost -Idevices -I$(IOS_DEPS)/include/slirp
+IOS_CFLAGS = -std=c11 -Wall -Wextra -O2 -g -Icore -Ihost -Idevices -I$(IOS_DEPS)/include/slirp -Ithird_party/zstd
 IB = build/ios
-IOS_SRC = $(wildcard core/*.c) host/prof_ios.c host/jit_region.c host/disk.c host/vm.c host/linux_boot.c host/linux_disk.c host/fdt.c host/net_slirp.c host/dns_proxy.c host/share.c host/audio_mac.c host/hvsparse.c host/usb_host.c \
+IOS_SRC = $(wildcard core/*.c) host/prof_ios.c host/jit_region.c host/disk.c host/vm.c host/linux_boot.c host/linux_disk.c host/linux_image.c host/fdt.c host/net_slirp.c host/dns_proxy.c host/share.c host/audio_mac.c host/hvsparse.c host/usb_host.c \
           $(filter-out devices/pvg_mac.m,$(wildcard devices/*.c))
-IOS_OBJ = $(patsubst %.c,$(IB)/%.o,$(IOS_SRC)) $(IB)/host/enter.o $(IB)/devices/pvg_metal.o
+IOS_OBJ = $(patsubst %.c,$(IB)/%.o,$(IOS_SRC)) $(IB)/host/enter.o $(IB)/devices/pvg_metal.o $(patsubst %.c,$(IB)/%.o,$(ZSTD_SRC))
 
+$(IB)/third_party/zstd/%.o: third_party/zstd/%.c
+	@mkdir -p $(dir $@)
+	$(IOS_CC) $(ZSTD_FLAGS) -c $< -o $@
 $(IB)/core/mmu.o: core/mmu.c core/*.h host/*.h devices/*.h
 	@mkdir -p $(dir $@)
 	$(IOS_CC) $(IOS_CFLAGS) -mgeneral-regs-only -c $< -o $@

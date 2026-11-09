@@ -9,6 +9,20 @@
    (henge_ios_jit_prewarm), and starts it. 0, or -1 with a reason in err. */
 int henge_vm_boot(const char *rom, const char *disk, const char *aux, uint64_t ecid, uint64_t seed, uint64_t ram_mb,
                   int cpus, char *err, size_t errlen);
+/* A Linux machine: boots what the disk's own boot entry names (Limine's limine.conf on its EFI partition,
+   host/linux_disk.h), with a width x height framebuffer as its display. extra is added to the kernel's
+   command line (may be NULL). 0, or -1 with a reason in err. */
+int henge_vm_boot_linux(const char *disk, uint64_t ram_mb, int cpus, uint32_t width, uint32_t height, const char *extra,
+                        char *err, size_t errlen);
+/* Unpacks a Zstandard disk image published in parts (host/linux_image.h) into a sparse disk, deleting each part
+   once read. Progress: henge_linux_unpack_progress (0..1). 0, or -1 with a reason in err. Blocking. */
+int henge_linux_unpack(const char *const *parts, int nparts, const char *disk, char *err, size_t errlen);
+double henge_linux_unpack_progress(void);
+/* Whether the disk has a boot entry Henge can start (a Linux disk). */
+int henge_linux_disk_bootable(const char *disk);
+/* Writes to the running Linux machine's serial console. */
+void henge_vm_serial_write(const char *text);
+
 /* Installs macOS from an IPSW onto a new machine (blank disk and auxiliary
    storage): boots the ROM in DFU mode and runs the restore over its USB port,
    as Virtualization.framework's installer does. workdir is scratch space.
