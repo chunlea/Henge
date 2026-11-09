@@ -134,6 +134,24 @@ targets:
             codesign --force --sign "$EXPANDED_CODE_SIGN_IDENTITY" --timestamp=none "$DST"
           fi
         basedOnDependencyAnalysis: false
+      - name: Embed GPU frameworks
+        # virglrenderer and ANGLE for Linux guests' 3D (scripts/fetch_virgl.sh), loaded at run time
+        # (devices/virtio_gpu_virgl.c), re-signed here. Without them Linux keeps a 2D display.
+        script: |
+          set -e
+          SRC="$SRCROOT/deps/virgl/ios"
+          if [ ! -d "$SRC" ]; then echo "warning: no $SRC (scripts/fetch_virgl.sh): Linux guests get no 3D"; exit 0; fi
+          for f in "$SRC"/*.framework; do
+            DST="$TARGET_BUILD_DIR/$FRAMEWORKS_FOLDER_PATH/$(basename "$f")"
+            rm -rf "$DST"
+            mkdir -p "$(dirname "$DST")"
+            ditto "$f" "$DST"
+            rm -rf "$DST/_CodeSignature" "$DST/Headers" "$DST/Modules"
+            if [ -n "$EXPANDED_CODE_SIGN_IDENTITY" ] && [ "$CODE_SIGNING_ALLOWED" != "NO" ]; then
+              codesign --force --sign "$EXPANDED_CODE_SIGN_IDENTITY" --timestamp=none "$DST"
+            fi
+          done
+        basedOnDependencyAnalysis: false
 
   # Built-in StikJIT's debugger (Husk docs/06-built-in-jit.md): a process cannot
   # debug itself, so StikJIT runs here and attaches to the app. iOS 26 and later.

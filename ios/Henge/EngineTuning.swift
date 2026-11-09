@@ -18,8 +18,17 @@ enum EngineTuning {
         "HV_STATS": "10",      // seconds between engine stats lines in the log; 0 = off
     ]
 
+    /// Linux guests' 3D: the app's Frameworks, when virglrenderer is embedded there (project.yml). HV_VIRGL= in
+    /// henge-env.txt turns it off.
+    static var gpuFrameworks: String? {
+        guard let dir = Bundle.main.privateFrameworksPath,
+              FileManager.default.fileExists(atPath: dir + "/virglrenderer.1.framework") else { return nil }
+        return dir
+    }
+
     static func apply() {
         var env = defaults
+        if let gpu = gpuFrameworks { env["HV_VIRGL"] = gpu }
         let d = UserDefaults.standard
         if [30, 120].contains(d.integer(forKey: refreshKey)) { env["HV_HZ"] = String(d.integer(forKey: refreshKey)) }
         if d.bool(forKey: superblocksKey) { env["HV_SUPERBLOCKS"] = "1" } else { unsetenv("HV_SUPERBLOCKS") }
