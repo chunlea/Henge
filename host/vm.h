@@ -55,6 +55,9 @@ typedef struct HvBootDisplay {
     uint32_t width, height, stride;
 } HvBootDisplay;
 int hv_vm_boot_display(HvBootDisplay *d);
+/* Linux with virtio-gpu: a count that moves whenever hv_vm_boot_display's picture may have changed,
+   so a viewer can skip unchanged frames. 0: no such count (look every time). */
+uint64_t hv_vm_display_changes(void);
 
 /* Extra device work on CPU 0 each tick (Mac graphics). Set before hv_vm_start. */
 void hv_vm_set_poll(void (*poll)(void));

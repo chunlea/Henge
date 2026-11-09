@@ -22,6 +22,7 @@ typedef struct HvVirtioGpu {
     uint32_t *display;         /* width * height, B8G8R8X8 (host memory) */
     uint32_t scanout_res;      /* the resource on the scanout, 0: none */
     uint64_t flushes;
+    uint64_t changes;          /* bumped by each flush and cursor command: the picture may differ */
     /* The cursor (the cursor queue): a 64x64 image, where it is, and its hot spot. */
     uint32_t cursor[64 * 64];
     int cursor_on;

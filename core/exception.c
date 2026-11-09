@@ -85,6 +85,10 @@ void hv_raise_undef(HvCpu *cpu, uint64_t pc) {
         uint32_t insn = 0;
         uint64_t pa;
         if (!hv_mmu_access(cpu, pc, HV_ACC_EXEC, cpu->el, &pa)) hv_phys_read(cpu->m, pa, &insn, 4);
+        /* An MRS of an ID register (op0 3, op1 0, CRn 0) at EL0: glibc reads MIDR_EL1 as every process starts,
+           and Linux emulates it. Expected, and too frequent to log. */
+        static int id_reads;
+        if (cpu->el == 0 && (insn & 0xfffff000u) == 0xd5380000u && id_reads++ >= 3) goto raise;
         fprintf(stderr, "undefined: pc %llx insn %08x el%u\n", (unsigned long long)pc, insn, cpu->el);
         if (cpu->el == 1) { /* a kernel assert: its backtrace, from the frame pointers (lr first) */
             fprintf(stderr, "  backtrace: lr %llx", (unsigned long long)(cpu->x[30] | 0xffffff8000000000ull));
@@ -100,6 +104,7 @@ void hv_raise_undef(HvCpu *cpu, uint64_t pc) {
             fprintf(stderr, "\n  vbar %llx\n", (unsigned long long)cpu->vbar_el1);
         }
     }
+raise:
     hv_raise_sync(cpu, HV_EC_UNKNOWN, 0, 0, pc);
 }
 

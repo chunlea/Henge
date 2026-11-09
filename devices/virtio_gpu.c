@@ -135,6 +135,7 @@ static uint32_t cmd_flush(HvVirtioGpu *g, const uint8_t *req) {
         else for (uint32_t x = 0; x < r.w; x++) dst[x] = to_display(res->format, src[x]);
     }
     g->flushes++;
+    g->changes++;
     return RESP_OK_NODATA;
 }
 
@@ -241,6 +242,7 @@ static void cursor(HvVirtioGpu *g, const HvVirtqElem *e) {
     memcpy(&id, req + 40, 4);
     memcpy(hot, req + 44, 8);
     g->cursor_x = (int32_t)pos[1], g->cursor_y = (int32_t)pos[2];
+    g->changes++;
     if (h.type != CMD_UPDATE_CURSOR) return;
     HvGpuResource *r = id ? find(g, id) : NULL;
     g->cursor_on = r != NULL;

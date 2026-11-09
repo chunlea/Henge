@@ -73,6 +73,7 @@ int henge_vm_boot_linux(const char *disk, uint64_t ram_mb, int cpus, uint32_t wi
     fprintf(stderr, "henge: booting Linux with %d CPUs, %llu MB RAM, a %ux%u screen, a %zu MB JIT region\n", cpus,
             (unsigned long long)ram_mb, width, height, jit->size >> 20);
     if (hv_vm_create(&c, err, errlen) != 0) return -1;
+    if (getenv("HV_STATS")) hv_vm_machine()->stats_interval = atoi(getenv("HV_STATS"));
     state = 1;
     hv_vm_start(1, on_exit);
     return 0;
@@ -221,6 +222,8 @@ void henge_vm_set_display_layer(void *layer) {
 uint64_t henge_vm_gpu_frames(void) {
     return hv_vm_gpu_frames();
 }
+
+uint64_t henge_vm_display_changes(void) { return state ? hv_vm_display_changes() : 0; }
 
 int henge_vm_boot_display(const uint8_t **pixels, int *width, int *height, int *stride) {
     HvBootDisplay d;

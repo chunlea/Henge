@@ -41,14 +41,21 @@ struct BootDisplay: View {
         .task {
             // Once macOS draws with the GPU the frames go straight to GPUScreen:
             // nothing to copy here any more.
+            // Linux's virtio-gpu says when its picture changes: then look 30 times a second, and copy
+            // only a frame that may differ. Otherwise (the Mac's boot framebuffer) 10 times a second.
+            var seen: UInt64 = 0
             while !Task.isCancelled && !gpuLive {
                 if henge_vm_gpu_frames() > 0 {
                     gpuLive = true
                     image = nil
                     break
                 }
-                image = Self.snapshot() ?? image
-                try? await Task.sleep(nanoseconds: 100_000_000)
+                let changes = henge_vm_display_changes()
+                if changes == 0 || changes != seen || image == nil {
+                    seen = changes
+                    image = Self.snapshot() ?? image
+                }
+                try? await Task.sleep(nanoseconds: changes == 0 ? 100_000_000 : 33_000_000)
             }
         }
     }

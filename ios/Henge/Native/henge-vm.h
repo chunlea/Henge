@@ -84,6 +84,8 @@ void henge_vm_set_display_layer(void *layer);
 /// How many frames have gone to it.
 uint64_t henge_vm_gpu_frames(void);
 int henge_vm_boot_display(const uint8_t **pixels, int *width, int *height, int *stride);
+/// Linux: moves whenever the picture henge_vm_boot_display gives may have changed; 0 when there is no such count.
+uint64_t henge_vm_display_changes(void);
 
 /* The largest single mapping the address space takes right now, in MB (the
    increased virtual addressing entitlement raises it). */

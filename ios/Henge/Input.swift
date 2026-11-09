@@ -64,6 +64,18 @@ struct KeyboardCatcher: UIViewRepresentable {
         /// Three fingers belong to the session (they show its controls), not to iPadOS's undo/copy/paste bar.
         override var editingInteractionConfiguration: UIEditingInteractionConfiguration { .none }
 
+        /// ⌘-Space is iPadOS's Spotlight, but Linux desktops (Omarchy's launcher) want it as Super-Space. Ask
+        /// to go first: where iPadOS allows that, the space reaches the guest with ⌘ (Super) still down.
+        private static let superSpace: UIKeyCommand = {
+            let command = UIKeyCommand(input: " ", modifierFlags: .command, action: #selector(KeyListener.sendSuperSpace))
+            command.wantsPriorityOverSystemBehavior = true
+            return command
+        }()
+
+        override var keyCommands: [UIKeyCommand]? { [Self.superSpace] }
+
+        @objc func sendSuperSpace() { HardwareKeys.tap(0x2c) }
+
         override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
             let rest = HardwareKeys.send(presses, down: true)
             if !rest.isEmpty { super.pressesBegan(rest, with: event) }

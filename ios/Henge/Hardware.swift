@@ -114,6 +114,14 @@ enum HardwareKeys {
         return rest
     }
 
+    /// A key that came as a key command rather than as presses: down and up, unless its presses came too.
+    static func tap(_ usage: UInt8) {
+        guard !held.contains(usage) else { return }
+        henge_vm_key_hid(usage, 1)
+        henge_vm_key_hid(usage, 0)
+        lastKey = CACurrentMediaTime()
+    }
+
     /// iPadOS can keep a key's release when it takes over, as it does for ⌘-Tab: the Mac must not
     /// go on thinking the key is down.
     static func releaseAll() {
