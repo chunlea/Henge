@@ -25,18 +25,67 @@ static int all_zero(const uint8_t *p, size_t n) {
     return 1;
 }
 
-/* Writes what the decoder produced at *pos, leaving zero blocks as holes. */
-static int put(int fd, const uint8_t *p, size_t n, uint64_t *pos) {
-    while (n) {
-        size_t in_block = BLOCK - (size_t)(*pos % BLOCK), take = n < in_block ? n : in_block;
-        if (!(take == BLOCK && all_zero(p, take))) {
-            for (size_t at = 0; at < take;) {
-                ssize_t w = pwrite(fd, p + at, take - at, (off_t)(*pos + at));
-                if (w <= 0) return -1;
-                at += (size_t)w;
-            }
+/* The decoder's output gathered into whole blocks: a block of zeros is a hole,
+   whatever pieces the decoder handed it over in. */
+typedef struct Sink {
+    int fd;
+    uint64_t pos; /* where blk goes */
+    size_t fill;
+    uint64_t zero_start, zero_len; /* the current run of zero blocks */
+    uint64_t (*runs)[2];           /* the finished runs, punched at the end */
+    size_t nruns, cap;
+    uint8_t blk[BLOCK];
+} Sink;
+
+/* APFS allocates some of a gap that writes merely skip over (a 112 KB gap took
+   about half its size), and punching while the file still grows does not help
+   either, so the zero runs are noted and punched out once the file is whole. */
+static void punch(Sink *k) {
+    if (!k->zero_len) return;
+    if (k->nruns == k->cap) {
+        size_t c = k->cap ? k->cap * 2 : 4096;
+        void *n = realloc(k->runs, c * sizeof *k->runs);
+        if (!n) { k->zero_len = 0; return; } /* only space is lost */
+        k->runs = n, k->cap = c;
+    }
+    k->runs[k->nruns][0] = k->zero_start, k->runs[k->nruns][1] = k->zero_len;
+    k->nruns++;
+    k->zero_len = 0;
+}
+
+static void punch_all(Sink *k) {
+    punch(k);
+#ifdef F_PUNCHHOLE
+    for (size_t i = 0; i < k->nruns; i++) {
+        fpunchhole_t h = {0, 0, (off_t)k->runs[i][0], (off_t)k->runs[i][1]};
+        (void)fcntl(k->fd, F_PUNCHHOLE, &h); /* only space: the bytes read as zero either way */
+    }
+#endif
+}
+
+static int flush_block(Sink *k) {
+    if (k->fill && all_zero(k->blk, k->fill)) {
+        if (!k->zero_len) k->zero_start = k->pos;
+        k->zero_len += k->fill;
+    } else if (k->fill) {
+        punch(k);
+        for (size_t at = 0; at < k->fill;) {
+            ssize_t w = pwrite(k->fd, k->blk + at, k->fill - at, (off_t)(k->pos + at));
+            if (w <= 0) return -1;
+            at += (size_t)w;
         }
-        *pos += take, p += take, n -= take;
+    }
+    k->pos += k->fill;
+    k->fill = 0;
+    return 0;
+}
+
+static int put(Sink *k, const uint8_t *p, size_t n) {
+    while (n) {
+        size_t take = BLOCK - k->fill < n ? BLOCK - k->fill : n;
+        memcpy(k->blk + k->fill, p, take);
+        k->fill += take, p += take, n -= take;
+        if (k->fill == BLOCK && flush_block(k)) return -1;
     }
     return 0;
 }
@@ -56,9 +105,10 @@ int hv_linux_image_unpack(const char *const *parts, int nparts, const char *out_
     uint8_t *inBuf = malloc(inCap), *outBuf = malloc(outCap);
     int r = -1;
     const char *why = "Not enough memory to unpack the disk.";
-    uint64_t pos = 0;
+    Sink *sink = calloc(1, sizeof *sink);
     size_t last = 0;
-    if (z && inBuf && outBuf) {
+    if (z && inBuf && outBuf && sink) {
+        sink->fd = out;
         ZSTD_initDStream(z);
         why = NULL;
         for (int i = 0; i < nparts && !why; i++) {
@@ -71,7 +121,7 @@ int hv_linux_image_unpack(const char *const *parts, int nparts, const char *out_
                     ZSTD_outBuffer ob = {outBuf, outCap, 0};
                     last = ZSTD_decompressStream(z, &ob, &ib);
                     if (ZSTD_isError(last)) { why = "The disk image is damaged (it did not decompress)."; break; }
-                    if (put(out, outBuf, ob.pos, &pos)) { why = "The disk could not be written (not enough space?)."; break; }
+                    if (put(sink, outBuf, ob.pos)) { why = "The disk could not be written (not enough space?)."; break; }
                 }
                 done += (uint64_t)n;
                 if (progress) progress(done, total, user);
@@ -86,15 +136,18 @@ int hv_linux_image_unpack(const char *const *parts, int nparts, const char *out_
             ZSTD_outBuffer ob = {outBuf, outCap, 0};
             last = ZSTD_decompressStream(z, &ob, &ib);
             if (ZSTD_isError(last)) why = "The disk image is damaged (it did not decompress).";
-            else if (put(out, outBuf, ob.pos, &pos)) why = "The disk could not be written (not enough space?).";
+            else if (put(sink, outBuf, ob.pos)) why = "The disk could not be written (not enough space?).";
             else if (!ob.pos) { if (last) why = "The disk image ends early (a part is missing or cut short)."; break; }
         }
-        if (!why && ftruncate(out, (off_t)pos) != 0) why = "The disk could not be written (not enough space?).";
+        if (!why && flush_block(sink)) why = "The disk could not be written (not enough space?).";
+        if (!why && ftruncate(out, (off_t)sink->pos) != 0) why = "The disk could not be written (not enough space?).";
+        if (!why) punch_all(sink);
         if (!why && fsync(out) != 0) why = "The disk could not be written (not enough space?).";
         if (!why) r = 0;
     }
     ZSTD_freeDStream(z);
-    free(inBuf), free(outBuf);
+    if (sink) free(sink->runs);
+    free(inBuf), free(outBuf), free(sink);
     close(out);
     if (r != 0) {
         unlink(out_path);
