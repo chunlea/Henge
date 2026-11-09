@@ -1,0 +1,43 @@
+Makefile
+  s_b515b51dffa838::t_4b37812d1dfb6f 63-64,118
+devices/vmapple.h
+  s_88b4b41dd4e594::t_91a8db41b6d043 78-81
+host/fdt.c
+  s_b515b51dffa838::t_07b4771f1b1521 1-122
+host/fdt.h
+  s_b515b51dffa838::t_8a9b775d7b11a5 1-34
+host/linux_boot.c
+  s_88b4b41dd4e594::t_38a4cef8feb7bd 1-349
+host/linux_boot.h
+  s_b515b51dffa838::t_1f8a4a2a2e761c 1-33
+host/main.c
+  s_b515b51dffa838::t_07fd52e1a49c47 901-902,923,964-966,992,997-998
+host/vm.c
+  s_b515b51dffa838::t_770ac8ff9b189d 24,48-49,51-55,235-237,244-246,264-265,267-281
+host/vm.h
+  s_b515b51dffa838::t_66b0c1bb04bf41 26-28,41
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "e23fad01c7cd4c849f0985e467e35773928d62ba",
+  "prompts": {},
+  "sessions": {
+    "s_88b4b41dd4e594": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "98a82d02-f90c-4ce4-92d5-c699e5f6aa85",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "chunli <git@chunli.dev>"
+    },
+    "s_b515b51dffa838": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "89349622-5136-4ace-b4ba-5eab1e5bfb32",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "chunli <git@chunli.dev>"
+    }
+  }
+}
