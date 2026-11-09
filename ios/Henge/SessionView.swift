@@ -561,7 +561,15 @@ struct SessionView: View {
             henge_vm_set_display_mm(0, 0)
         }
         HengeLog.log("session", "screen \(mac.screen.width)x\(mac.screen.height) retina \(mac.isRetina)")
-        let rc = henge_vm_boot(mac.rom.path, mac.disk.path, mac.aux.path, mac.ecid, mac.seed, ram, Int32(cpus), &buffer, buffer.count)
+        let rc: Int32
+        if mac.isLinux {
+            // The disk's own boot entry (host/linux_disk.c). Under emulation udev takes minutes over its first
+            // pass, longer than systemd's 90 s wait for a disk: that would drop Omarchy into its emergency shell.
+            rc = henge_vm_boot_linux(mac.disk.path, ram, Int32(cpus), UInt32(mac.screen.width), UInt32(mac.screen.height),
+                                     "systemd.default_device_timeout_sec=900", &buffer, buffer.count)
+        } else {
+            rc = henge_vm_boot(mac.rom.path, mac.disk.path, mac.aux.path, mac.ecid, mac.seed, ram, Int32(cpus), &buffer, buffer.count)
+        }
         if rc != 0 {
             error = String(cString: buffer)
             return

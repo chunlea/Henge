@@ -16,6 +16,14 @@ enum Device {
         return (1920, min(max(Int((1920 / shape / 8).rounded()) * 8, 1080), 1440))
     }
 
+    /// A Linux machine's framebuffer: the device's shape, 1280 wide. Linux draws it with the emulated CPUs
+    /// (there is no GPU for it), so it is kept smaller than a Mac's screen.
+    static var linuxScreen: (width: Int, height: Int) {
+        let size = UIScreen.main.bounds.size
+        let shape = max(size.width, size.height) / max(min(size.width, size.height), 1)
+        return (1280, min(max(Int((1280 / shape / 8).rounded()) * 8, 720), 960))
+    }
+
     /// Preserve the iPad's shape while reducing the virtual GPU's pixel work.
     static var performanceScreen: (width: Int, height: Int) {
         let fit = fittingScreen

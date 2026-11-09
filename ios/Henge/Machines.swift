@@ -22,6 +22,11 @@ struct VirtualMac: Identifiable, Codable, Hashable {
     var screen: (width: Int, height: Int) { isRetina ? Device.retinaScreen : (screenWidth ?? 1920, screenHeight ?? 1080) }
     var aspect: CGFloat { CGFloat(screen.width) / CGFloat(screen.height) }
 
+    /// "linux" for a Linux machine (LinuxInstaller.swift): a disk and nothing else, booted from its own
+    /// boot entry. nil for a Mac, as every machine made before Linux was.
+    var system: String?
+    var isLinux: Bool { system == "linux" }
+
     var directory: URL { Machines.directory(for: id) }
     var rom: URL { directory.appendingPathComponent("AVPBooter.vmapple2.bin") }
     var disk: URL { directory.appendingPathComponent("disk.img") }
@@ -47,8 +52,9 @@ enum GuestMemory {
 }
 
 /// machine.json in an exported folder (tools/export_ios.sh writes it).
-private struct MachineFile: Codable {
+struct MachineFile: Codable {
     var name: String?
+    var system: String?
     var ecid: UInt64
     var seed: UInt64?
     var ramMB: Int?
@@ -108,7 +114,8 @@ final class Machines: ObservableObject {
                                      ramMB: info.ramMB ?? Device.suggestedRAMGB * 1024, diskBytes: 64 << 30)
                 let os = (try? String(contentsOf: marker, encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
                 mac.osName = os.isEmpty ? nil : os
-                (mac.screenWidth, mac.screenHeight) = Device.fittingScreen
+                mac.system = info.system
+                (mac.screenWidth, mac.screenHeight) = mac.isLinux ? Device.linuxScreen : Device.fittingScreen
                 all.append(mac)
                 save()
                 try? fm.removeItem(at: item.appendingPathComponent("restore"))

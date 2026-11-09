@@ -13,9 +13,12 @@ struct HomeView: View {
     @State private var chosen: UUID?
 
     /// The Mac on show: the one picked, or the one used last.
+    /// Linux machines have their own tab (LinuxView).
+    private var macs: [VirtualMac] { machines.all.filter { !$0.isLinux } }
+
     private var mac: VirtualMac? {
-        if let chosen, let mac = machines.all.first(where: { $0.id == chosen }) { return mac }
-        return machines.all.max { ($0.lastUsed ?? $0.added) < ($1.lastUsed ?? $1.added) }
+        if let chosen, let mac = macs.first(where: { $0.id == chosen }) { return mac }
+        return macs.max { ($0.lastUsed ?? $0.added) < ($1.lastUsed ?? $1.added) }
     }
 
     var body: some View {
@@ -103,7 +106,7 @@ struct HomeView: View {
     }
 
     @ViewBuilder private func others(besides shown: VirtualMac) -> some View {
-        let rest = machines.all.filter { $0.id != shown.id }
+        let rest = macs.filter { $0.id != shown.id }
         if !rest.isEmpty {
             DeskHeading("Other Macs")
             VStack(spacing: 0) {

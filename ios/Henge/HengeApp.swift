@@ -36,7 +36,7 @@ struct HengeApp: App {
 }
 
 struct RootView: View {
-    enum Tab: Hashable { case macs, install, settings }
+    enum Tab: Hashable { case macs, linux, install, settings }
 
     @ObservedObject private var machines = Machines.shared
     @ObservedObject private var jit = JITCoordinator.shared
@@ -50,6 +50,9 @@ struct RootView: View {
                 HomeView(running: $running, tab: $tab)
                     .tabItem { Label("Macs", systemImage: "macwindow") }
                     .tag(Tab.macs)
+                LinuxView(running: $running)
+                    .tabItem { Label("Linux", systemImage: "terminal") }
+                    .tag(Tab.linux)
                 InstallView()
                     .tabItem { Label("Install", systemImage: "arrow.down.circle") }
                     .tag(Tab.install)
