@@ -1,0 +1,21 @@
+ios/Henge/Autopilot.swift
+  s_862d92eac8a50c::t_3c842f4d1ca386 23-24,144-155
+ios/Henge/LinuxInstaller.swift
+  s_862d92eac8a50c::t_d90693b48376c9 80
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "07d1535290ead26a83ab35bd04b10b0a21519f23",
+  "prompts": {},
+  "sessions": {
+    "s_862d92eac8a50c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2a2ea67b-10a4-470a-aa9f-ca4aec62a749",
+        "model": "unknown"
+      },
+      "human_author": "chunli <git@chunli.dev>"
+    }
+  }
+}
