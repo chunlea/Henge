@@ -1,0 +1,25 @@
+host/main.c
+  s_862d92eac8a50c::t_1f647016cf42f0 7-8,923-948,1086
+devices/cfg.h
+  s_862d92eac8a50c::t_d71ce9afa0ebe2 19
+devices/vmapple.c
+  s_862d92eac8a50c::t_34b124314eb547 311
+host/vm.c
+  s_862d92eac8a50c::t_80030b15576118 275
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "a4cb98ec57b205f307306f7d042ebc3961e28593",
+  "prompts": {},
+  "sessions": {
+    "s_862d92eac8a50c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2a2ea67b-10a4-470a-aa9f-ca4aec62a749",
+        "model": "unknown"
+      },
+      "human_author": "chunli <git@chunli.dev>"
+    }
+  }
+}
