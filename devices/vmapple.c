@@ -232,6 +232,7 @@ static uint64_t tick_locked(HvMachine *m, HvCpu *cpu) {
     hv_virtio_usb_poll(b->vusb);
     hv_virtio_balloon_poll(b->balloon);
     hv_virtio_gpu_poll(b->gpu);
+    hv_nvme_poll(b->nvme);
     hv_bdif_poll(b->bdif);
     return deadline; /* every GIC state change already updated the CPU's lines */
 }

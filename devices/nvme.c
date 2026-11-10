@@ -82,9 +82,17 @@ static void post(HvNvme *n, int sqid, uint16_t cid, int status, uint32_t result)
     put16(e + 10, (uint16_t)sqid);
     put16(e + 12, cid);
     put16(e + 14, (uint16_t)(status << 1 | cq->phase));
-    hv_phys_write(n->m, cq->base + (uint64_t)cq->tail * 16, e, 16);
+    /* The word with the phase bit goes last, and whole: the driver may be reading the queue on another CPU,
+       and the bit is what tells it the entry (and the command id beside it) is there. */
+    uint64_t at = cq->base + (uint64_t)cq->tail * 16;
+    uint32_t *last = hv_phys_ptr(n->m, at + 12, 4);
+    if (!last) return;
+    hv_phys_write(n->m, at, e, 12);
+    __atomic_store_n(last, get32(e + 12), __ATOMIC_RELEASE);
     if (++cq->tail == cq->size) cq->tail = 0, cq->phase ^= 1;
 }
+
+static void drain(HvNvme *n);
 
 static void ascii(uint8_t *to, size_t len, const char *s) {
     memset(to, ' ', len);
@@ -92,7 +100,8 @@ static void ascii(uint8_t *to, size_t len, const char *s) {
 }
 
 static int identify(HvNvme *n, const uint8_t *c) {
-    uint8_t *d = n->bounce;
+    static uint8_t page[4096]; /* admin commands are the CPU thread's, one at a time (the device lock); the bounce buffer is the worker's */
+    uint8_t *d = page;
     uint32_t nsid = get32(c + 4);
     uint64_t blocks = n->disk->size / BLOCK;
     memset(d, 0, 4096);
@@ -138,8 +147,10 @@ static int admin(HvNvme *n, const uint8_t *c, uint32_t *result) {
     uint32_t cdw10 = get32(c + 40), cdw11 = get32(c + 44);
     uint32_t qid = cdw10 & 0xffff, qsize = (cdw10 >> 16) + 1;
     switch (c[0]) {
-    case 0x00: /* delete a submission queue */
+    case 0x00: /* delete a submission queue: once its commands have completed */
         if (!qid || qid > HV_NVME_QUEUES || !n->sq[qid].base) return SC_BAD_QUEUE;
+        drain(n);
+        hv_nvme_poll(n);
         n->sq[qid] = (HvNvmeQueue){0};
         return SC_OK;
     case 0x01: /* create one: its completions go to queue cdw11 >> 16 */
@@ -158,10 +169,10 @@ static int admin(HvNvme *n, const uint8_t *c, uint32_t *result) {
         n->cq[qid] = (HvNvmeQueue){.base = get64(c + 24) & ~(uint64_t)(n->page - 1), .size = qsize, .ien = (cdw11 >> 1) & 1, .phase = 1};
         return SC_OK;
     case 0x02: { /* a log page: no errors, a healthy disk, firmware in slot 1 */
+        static uint8_t zeros[4096];
         uint64_t len = ((uint64_t)((cdw10 >> 16) | (cdw11 & 0xffff) << 16) + 1) * 4;
-        if (len > BOUNCE) len = BOUNCE;
-        memset(n->bounce, 0, len);
-        return prp_xfer(n, get64(c + 24), get64(c + 32), n->bounce, len, 1) ? SC_DATA_ERROR : SC_OK;
+        if (len > sizeof zeros) len = sizeof zeros;
+        return prp_xfer(n, get64(c + 24), get64(c + 32), zeros, len, 1) ? SC_DATA_ERROR : SC_OK;
     }
     case 0x06: return identify(n, c);
     case 0x08: /* abort: the command it names has finished by now */
@@ -203,25 +214,99 @@ static int io(HvNvme *n, const uint8_t *c) {
     return hv_disk_write(n->disk, lba * BLOCK, n->bounce, len) ? SC_DATA_ERROR : SC_OK;
 }
 
+static void *worker(void *opaque) {
+    HvNvme *n = opaque;
+    for (;;) {
+        pthread_mutex_lock(&n->mu);
+        n->busy = 0;
+        pthread_cond_broadcast(&n->idle_cv);
+        while (n->claimed == __atomic_load_n(&n->submitted, __ATOMIC_ACQUIRE)) {
+            if (n->stopping) {
+                pthread_mutex_unlock(&n->mu);
+                return NULL;
+            }
+            pthread_cond_wait(&n->cv, &n->mu);
+        }
+        HvNvmeReq *r = &n->ring[n->claimed++ % HV_NVME_RING];
+        n->busy = 1;
+        pthread_mutex_unlock(&n->mu);
+        r->status = io(n, r->cmd);
+        __atomic_store_n(&r->done, 1, __ATOMIC_RELEASE);
+        hv_machine_wake(n->m); /* the CPU that polls the devices, for the completion */
+    }
+}
+
+/* Everything handed to the worker is finished (a reset, a shutdown, the machine stopping). */
+static void drain(HvNvme *n) {
+    if (!n->worker_started) return;
+    pthread_mutex_lock(&n->mu);
+    while (n->busy || n->claimed != n->submitted) pthread_cond_wait(&n->idle_cv, &n->mu);
+    pthread_mutex_unlock(&n->mu);
+}
+
 /* The driver moved a submission queue's tail: carry out what is new. */
 static void run(HvNvme *n, int qid) {
     HvNvmeQueue *sq = &n->sq[qid];
+    int handed = 0;
     while (sq->base && sq->head != sq->tail) {
         uint8_t c[64];
+        if (qid && n->submitted - n->posted == HV_NVME_RING) { /* no room: when some have completed (hv_nvme_poll) */
+            n->waiting |= 1u << qid;
+            break;
+        }
         if (hv_phys_read(n->m, sq->base + (uint64_t)sq->head * 64, c, 64)) break;
         if (++sq->head == sq->size) sq->head = 0;
+        if (qid) {
+            HvNvmeReq *r = &n->ring[n->submitted % HV_NVME_RING];
+            memcpy(r->cmd, c, 64);
+            r->sqid = (uint16_t)qid;
+            r->done = r->posted = 0;
+            pthread_mutex_lock(&n->mu); /* with the worker's wait, so the signal is not lost */
+            __atomic_store_n(&n->submitted, n->submitted + 1, __ATOMIC_RELEASE);
+            pthread_mutex_unlock(&n->mu);
+            handed = 1;
+            continue;
+        }
         uint32_t result = 0;
-        int status = qid ? io(n, c) : admin(n, c, &result);
-        if (status != SC_OK && status != SC_NO_COMPLETION) {
+        int status = admin(n, c, &result);
+        if (status != SC_OK && status != SC_NO_COMPLETION && c[0] != 0x06) { /* an identify that is not known is a driver looking around */
             n->errors++;
-            if (n->m->log) fprintf(stderr, "hengevm: nvme: %s command %02x failed (status %x)\n", qid ? "i/o" : "admin", c[0], status & 0x7ff);
+            if (n->m->log) fprintf(stderr, "hengevm: nvme: admin command %02x failed (status %x)\n", c[0], status & 0x7ff);
         }
         if (status != SC_NO_COMPLETION) post(n, qid, (uint16_t)(c[2] | c[3] << 8), status, result);
     }
+    if (handed) pthread_cond_signal(&n->cv);
+    update_irq(n);
+}
+
+void hv_nvme_poll(HvNvme *n) {
+    if (!n || n->posted == n->submitted) return;
+    int any = 0;
+    /* Completions go out as they finish, in any order; `posted` moves past the ones at the front. */
+    for (uint32_t i = n->posted; i != n->submitted; i++) {
+        HvNvmeReq *r = &n->ring[i % HV_NVME_RING];
+        if (r->posted || !__atomic_load_n(&r->done, __ATOMIC_ACQUIRE)) continue;
+        if (r->status != SC_OK) {
+            n->errors++;
+            if (n->m->log) fprintf(stderr, "hengevm: nvme: i/o command %02x failed (status %x)\n", r->cmd[0], r->status & 0x7ff);
+        }
+        post(n, r->sqid, (uint16_t)(r->cmd[2] | r->cmd[3] << 8), r->status, 0);
+        r->posted = 1;
+        any = 1;
+    }
+    while (n->posted != n->submitted && n->ring[n->posted % HV_NVME_RING].posted) n->posted++;
+    if (!any) return;
+    uint32_t waiting = n->waiting;
+    n->waiting = 0;
+    for (int q = 1; waiting && q <= HV_NVME_QUEUES; q++)
+        if (waiting >> q & 1) run(n, q);
     update_irq(n);
 }
 
 static void enable(HvNvme *n, int on) {
+    drain(n); /* what was in flight belongs to queues that are about to go */
+    n->posted = n->submitted;
+    n->waiting = 0;
     memset(n->sq, 0, sizeof n->sq);
     memset(n->cq, 0, sizeof n->cq);
     n->csts = 0;
@@ -276,7 +361,9 @@ static void bar_write(HvPciDev *d, int bar, uint64_t off, uint64_t v, unsigned s
         uint32_t old = n->cc;
         n->cc = (uint32_t)v;
         if ((old ^ n->cc) & 1) enable(n, n->cc & 1);
-        if ((n->cc >> 14) & 3) { /* shutdown notification: everything is on the disk file already */
+        if ((n->cc >> 14) & 3) { /* shutdown notification: once nothing is in flight, everything is on the disk file */
+            drain(n);
+            hv_nvme_poll(n);
             hv_disk_flush(n->disk);
             n->csts |= 2u << 2;
         } else n->csts &= ~(3u << 2);
@@ -299,9 +386,23 @@ static void bar_write(HvPciDev *d, int bar, uint64_t off, uint64_t v, unsigned s
 
 HvNvme *hv_nvme_create(HvMachine *m, HvPcie *bus, HvDisk *disk) {
     HvNvme *n = calloc(1, sizeof *n);
-    if (!n || !(n->bounce = malloc(BOUNCE))) { free(n); return NULL; }
+    if (!n) return NULL;
+    n->bounce = malloc(BOUNCE);
+    n->ring = calloc(HV_NVME_RING, sizeof *n->ring);
+    if (!n->bounce || !n->ring) {
+        free(n->bounce), free(n->ring), free(n);
+        return NULL;
+    }
     n->m = m;
     n->disk = disk;
+    pthread_mutex_init(&n->mu, NULL);
+    pthread_cond_init(&n->cv, NULL);
+    pthread_cond_init(&n->idle_cv, NULL);
+    n->worker_started = pthread_create(&n->worker, NULL, worker, n) == 0;
+    if (!n->worker_started) {
+        hv_nvme_destroy(n);
+        return NULL;
+    }
     /* Queues of up to 1024 entries, contiguous; 7.5 s to become ready; the NVM command set; pages from 4 KB to 64 KB. */
     n->cap = 1023 | 1ull << 16 | 15ull << 24 | 1ull << 37 | 4ull << 52;
     hv_pci_init(&n->pci, 0x1b36, 0x0010, 0x01080202, 0x1af4, 0x1100); /* QEMU's NVMe ids; class: NVM Express */
@@ -316,8 +417,23 @@ HvNvme *hv_nvme_create(HvMachine *m, HvPcie *bus, HvDisk *disk) {
     return n;
 }
 
+void hv_nvme_stop(HvNvme *n) {
+    if (!n || !n->worker_started) return;
+    pthread_mutex_lock(&n->mu);
+    n->stopping = 1;
+    pthread_cond_broadcast(&n->cv);
+    pthread_mutex_unlock(&n->mu);
+    pthread_join(n->worker, NULL); /* it finishes what was submitted first */
+    n->worker_started = 0;
+}
+
 void hv_nvme_destroy(HvNvme *n) {
     if (!n) return;
+    hv_nvme_stop(n);
+    pthread_mutex_destroy(&n->mu);
+    pthread_cond_destroy(&n->cv);
+    pthread_cond_destroy(&n->idle_cv);
     free(n->bounce);
+    free(n->ring);
     free(n);
 }

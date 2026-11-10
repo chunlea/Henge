@@ -491,6 +491,7 @@ static void *cpu0_thread(void *unused) {
     /* A DMA worker can still be writing after the guest CPUs have exited. */
     hv_virtio_blk_stop(board.root_blk);
     hv_virtio_blk_stop(board.aux_blk);
+    hv_nvme_stop(board.nvme);
     hv_audio_detach();
     hv_vm_flush_disks();
     if (exit_cb) exit_cb(r);
