@@ -163,6 +163,10 @@ PROGRAM exclusive
     add w12, w12, #3
     stlxrh w13, w12, [x18]
     cbnz w13, 4b
+    mov w15, #0x5a          // an LDXR into XZR still arms the monitor (Chromium spins on this)
+5:  ldaxrb wzr, [x1]
+    stlxrb w14, w15, [x1]
+    cbnz w14, 5b
 END exclusive
 
 PROGRAM atomics

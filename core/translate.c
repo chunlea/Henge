@@ -898,7 +898,10 @@ static void translate_excl(Emit *e, uint32_t insn, uint64_t pc) {
     uint32_t size = insn >> 30;
     int rn = (insn >> 5) & 0x1f, rt = insn & 0x1f, rs = (insn >> 16) & 0x1f;
     int load = (insn >> 22) & 1;
-    if (!load && (rs == 31 || rs == rt || rs == rn)) { /* the status register is the CAS's compare value: keep these in C */
+    /* The status register is the CAS's compare value: keep these in C. So is an LDXR into XZR (Chromium's
+       "ldaxrb wzr" before a "stlxrb" that sets a bit): the value it saw comes from rt, and XZR reads 0, so the
+       STXR's compare would never match and the loop would spin for ever. */
+    if ((!load && (rs == 31 || rs == rt || rs == rn)) || (load && rt == 31)) {
         put_helper(e, pc, insn, HV_OP_MEM);
         return;
     }
