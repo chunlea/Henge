@@ -1,0 +1,43 @@
+host/vm.c
+  s_be58c8822e297c::t_9a3298b92f9691 804-813
+ios/Henge/BootDisplay.swift
+  s_be58c8822e297c::t_76b2889b31cbdb 14-15,31,36
+ios/Henge/Hardware.swift
+  s_be58c8822e297c::t_53888db670f964 27-30
+ios/Henge/HengeApp.swift
+  s_be58c8822e297c::t_dc17c1472bbff0 39,56-58,101
+ios/Henge/HomeView.swift
+  s_be58c8822e297c::t_358959b94a6d5b 16-17
+ios/Henge/Machines.swift
+  s_be58c8822e297c::t_8afa3f8cbba8ba 29-36,42-44,140
+ios/Henge/Native/henge-vm.c
+  s_be58c8822e297c::t_68a3a5d424b15f 21-22,134-170
+ios/Henge/Native/henge-vm.h
+  s_be58c8822e297c::t_0b3e61eb444b40 17-23
+ios/Henge/SessionView.swift
+  s_be58c8822e297c::t_393b18cc2c96c0 62,68,103,137,171,460,473,493,506,509-529,614,629-639,704-707
+ios/Henge/StoppedMacView.swift
+  s_be58c8822e297c::t_fab2a98ec75818 7-8,12-13,25-26,29-30,40
+ios/Henge/WindowsView.swift
+  s_be58c8822e297c::t_4fe191593c1873 1-449
+ios/project.yml
+  s_be58c8822e297c::t_75b268d56a1aa3 108-115
+ios/scripts/fetch_uefi.sh
+  s_be58c8822e297c::t_3e681e442b89e4 1-23
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "2d3cbffb5a328c750ba4cf7af7e0872c7dc330c9",
+  "prompts": {},
+  "sessions": {
+    "s_be58c8822e297c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "460830a0-c917-44aa-9aea-92d45fd794ef",
+        "model": "unknown"
+      },
+      "human_author": "chunli <git@chunli.dev>"
+    }
+  }
+}
