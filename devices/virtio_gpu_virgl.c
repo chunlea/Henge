@@ -222,6 +222,39 @@ static void unref(HvGpuVirgl *v, uint32_t id) {
         }
 }
 
+/* Multisampling, pretended. virglrenderer keeps a multisampled surface in a multisample texture, which ANGLE's
+   OpenGL ES 3.0 does not have, so it says one sample and Mesa in the guest gives GL_MAX_SAMPLES 1. ES 3.0 asks for
+   4: Chromium's own ANGLE finds less and refuses ES 3 on the device (its GPU process exits, and pages are drawn by
+   the CPU). So the capabilities say 4 samples, for every format that can be rendered to, and a resource asked for
+   with samples is made without them (create): what is drawn into it comes out right, just not antialiased.
+   HV_VIRGL_MSAA=0: as virglrenderer says. Offsets: struct virgl_caps_v1/v2 in virglrenderer's virgl_hw.h. */
+enum { CAPS_RENDER = 68, CAPS_DEPTHSTENCIL = 132, CAPS_BSET = 260, CAPS_MAX_SAMPLES = 284, CAPS_V1_SIZE = 308,
+       CAPS_MULTISAMPLE_FORMATS = 768, CAPS_MASK_WORDS = 16, CAPS_BSET_TEXTURE_MULTISAMPLE = 1u << 14 };
+static int msaa_pretended;
+
+static void caps_pretend_msaa(uint8_t *caps, uint32_t size) {
+    static int on = -1;
+    if (on < 0) on = !(getenv("HV_VIRGL_MSAA") && !atoi(getenv("HV_VIRGL_MSAA")));
+    uint32_t samples, bset;
+    if (!on || size < CAPS_V1_SIZE) return;
+    memcpy(&samples, caps + CAPS_MAX_SAMPLES, 4);
+    if (samples > 1 && !msaa_pretended) return; /* a host that has it */
+    msaa_pretended = 1;
+    samples = 4;
+    memcpy(caps + CAPS_MAX_SAMPLES, &samples, 4);
+    memcpy(&bset, caps + CAPS_BSET, 4);
+    bset |= CAPS_BSET_TEXTURE_MULTISAMPLE;
+    memcpy(caps + CAPS_BSET, &bset, 4);
+    if (size < CAPS_MULTISAMPLE_FORMATS + CAPS_MASK_WORDS * 4) return;
+    for (int i = 0; i < CAPS_MASK_WORDS; i++) {
+        uint32_t r, d;
+        memcpy(&r, caps + CAPS_RENDER + i * 4, 4);
+        memcpy(&d, caps + CAPS_DEPTHSTENCIL + i * 4, 4);
+        r |= d;
+        memcpy(caps + CAPS_MULTISAMPLE_FORMATS + i * 4, &r, 4);
+    }
+}
+
 static uint32_t create(HvGpuVirgl *v, struct virgl_renderer_resource_create_args *a) {
     if (!a->handle || find(v, a->handle)) return RESP_ERR_INVALID_RESOURCE_ID;
     Res *r = calloc(1, sizeof *r);
@@ -230,6 +263,7 @@ static uint32_t create(HvGpuVirgl *v, struct virgl_renderer_resource_create_args
        SHARED a resource is an ordinary GL texture. With them virglrenderer backs it by an external image, and stores
        an alpha-less one (B8G8R8X8, which Linux scans out) as RGB8, which ANGLE can neither render to nor read back. */
     a->bind &= ~(VIRGL_BIND_SCANOUT | VIRGL_BIND_SHARED);
+    if (msaa_pretended && a->nr_samples > 1) a->nr_samples = 0; /* see caps_pretend_msaa */
     if (vr.resource_create(a, NULL, 0)) { free(r); return RESP_ERR_UNSPEC; }
     r->id = a->handle, r->format = a->format, r->w = a->width, r->h = a->height;
     r->next = v->res;
@@ -318,6 +352,7 @@ static uint32_t control(HvGpuVirgl *v, Req *q) {
         uint8_t *out = calloc(1, 24 + max_size);
         if (!out) { type = RESP_ERR_OUT_OF_MEMORY; break; }
         vr.fill_caps(id, version, out + 24);
+        caps_pretend_msaa(out + 24, max_size);
         Hdr o = {.type = RESP_OK_CAPSET, .flags = h.flags & FLAG_FENCE, .fence_id = h.fence_id, .ctx_id = h.ctx_id};
         memcpy(out, &o, sizeof o);
         uint32_t w = hv_virtq_write(&g->vio, e, 0, out, 24 + max_size);
