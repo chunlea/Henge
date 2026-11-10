@@ -560,6 +560,17 @@ struct SessionView: View {
                 }
                 }
                 if mac.isWindows {
+                Section("GPU Driver") {
+                    Button("Type the GPU Driver Command") {
+                        showDetails = false
+                        Task {
+                            try? await Task.sleep(nanoseconds: 600_000_000)
+                            await WindowsSetup.typeHere(WindowsSetup.gpuDriver)
+                        }
+                    }
+                    Text("Windows draws with the emulated CPUs until it has a driver for this machine's GPU: UTM's Direct3D 11 driver (viogpu3d, experimental). Download the driver disc in the machine's settings (Windows tab) and start the machine; in Windows open Terminal or Command Prompt as administrator, tap this, and press Return. The screen changes over when the driver starts. It installs from drive D:.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
                 Section("Larger Screen") {
                     Button("Type the Larger Screen Command") {
                         showDetails = false
@@ -682,8 +693,13 @@ struct SessionView: View {
                 error = WindowsFirmware.missing
                 return
             }
-            rc = henge_vm_boot_uefi(firmware, mac.vars.path, mac.disk.path, media ? mac.media.path : nil, ram, Int32(cpus),
-                                    UInt32(mac.screen.width), UInt32(mac.screen.height), &buffer, buffer.count)
+            // In the drive: the installation disc, or else the disc with the GPU driver.
+            let tools = FileManager.default.fileExists(atPath: mac.tools.path)
+            let disc = media ? mac.media.path : tools ? mac.tools.path : nil
+            let gpu = mac.gpu == false ? nil : EngineTuning.windowsGPU
+            HengeLog.log("session", "Windows: disc \(disc.map { ($0 as NSString).lastPathComponent } ?? "none"), GPU \(gpu == nil ? "off" : "on")")
+            rc = henge_vm_boot_uefi(firmware, mac.vars.path, mac.disk.path, disc, ram, Int32(cpus),
+                                    UInt32(mac.screen.width), UInt32(mac.screen.height), gpu, &buffer, buffer.count)
         } else if mac.isLinux {
             // The disk's own boot entry (host/linux_disk.c). Under emulation udev takes minutes over its first
             // pass, longer than systemd's 90 s wait for a disk: that would drop Omarchy into its emergency shell.

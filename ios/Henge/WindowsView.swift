@@ -39,6 +39,11 @@ enum WindowsSetup {
     /// Windows' boot manager picks the display's size, from what the firmware offers: the largest is 1024 x 768.
     static let largerScreen = "bcdedit /set {globalsettings} highestmode on\n"
 
+    /// Installs UTM's Direct3D driver from its guest tools disc, which is in drive D: when it is the only disc.
+    static let gpuDriver = "pnputil /add-driver D:\\Drivers\\viogpu3d\\w11\\ARM64\\viogpu3d.inf /install"
+    /// The disc: UTM's guest tools, from the driver's own releases (github.com/osy/kvm-guest-drivers-windows, v0.5).
+    static let toolsURL = URL(string: "https://github.com/osy/kvm-guest-drivers-windows/releases/download/v0.5/utm-guest-tools-0.1.275.iso")!
+
     /// Typed into a window that is open already.
     @MainActor static func typeHere(_ command: String) async {
         for c in command {
@@ -92,6 +97,32 @@ final class WindowsInstaller: ObservableObject {
         if url.pathExtension == "hvsparse" { name = (name as NSString).deletingPathExtension }
         make(name: name, ramMB: ramMB, working: "Bringing in \(url.lastPathComponent)…",
              source: url) { $0.disk }
+    }
+
+    /// The disc with the GPU driver, downloaded into the machine's folder (about 140 MB).
+    func downloadTools(_ mac: VirtualMac) {
+        guard !busy else { return }
+        working = "Downloading the GPU driver disc…"
+        copied = 0
+        failure = nil
+        Task {
+            defer { working = nil }
+            do {
+                let (file, response) = try await URLSession.shared.download(from: WindowsSetup.toolsURL)
+                guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw Self.message("The driver disc could not be downloaded.") }
+                try? FileManager.default.removeItem(at: mac.tools)
+                try FileManager.default.moveItem(at: file, to: mac.tools)
+                HengeLog.log("windows", "the GPU driver disc is in \(mac.name)'s drive")
+            } catch {
+                failure = error.localizedDescription
+            }
+            objectWillChange.send()
+        }
+    }
+
+    func removeTools(_ mac: VirtualMac) {
+        try? FileManager.default.removeItem(at: mac.tools)
+        objectWillChange.send()
     }
 
     /// The installation disc is several GB that nothing needs once Windows is on the disk.
@@ -443,6 +474,30 @@ struct WindowsSettingsView: View {
                     .pickerStyle(.menu)
                     Text("The shape of this \(Device.name)'s screen, from the next start. Windows draws with the emulated CPUs (it has no display driver for this machine), so a larger screen is slower. This is the largest size Windows offers: a Windows installed at another size keeps it until this one is chosen in its Settings, System, Display.")
                         .font(.system(size: 13)).foregroundStyle(Desk.dim)
+                }
+                .padding(17)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .deskCard()
+
+                DeskHeading("GPU")
+                VStack(alignment: .leading, spacing: 10) {
+                    Toggle("GPU", isOn: Binding(get: { machine.gpu != false }, set: { machine.gpu = $0; machines.update(machine) }))
+                        .font(.system(size: 16))
+                    Text(EngineTuning.windowsGPU == nil
+                         ? "This build of Henge has no GPU frameworks for Windows (ios/scripts/fetch_virgl.sh)."
+                         : "Windows uses it once UTM's Direct3D 11 driver is installed in it (experimental: some of Windows' own interface is drawn with pieces missing). Until then, and with this off, Windows draws with the emulated CPUs.")
+                        .font(.system(size: 13)).foregroundStyle(Desk.dim)
+                    if FileManager.default.fileExists(atPath: machine.tools.path) {
+                        Text("The driver disc is in the machine's drive (D: in Windows, when there is no installation disc). The session's Details type the command that installs the driver.")
+                            .font(.system(size: 13)).foregroundStyle(Desk.dim)
+                        Button("Remove the Driver Disc", role: .destructive) { installer.removeTools(machine) }
+                            .font(.system(size: 15, weight: .semibold))
+                    } else {
+                        Button(installer.working ?? "Download the Driver Disc (140 MB)") { installer.downloadTools(machine) }
+                            .font(.system(size: 15, weight: .semibold))
+                            .disabled(installer.busy)
+                    }
+                    if let failure = installer.failure { Text(failure).font(.system(size: 13)).foregroundStyle(Desk.bad) }
                 }
                 .padding(17)
                 .frame(maxWidth: .infinity, alignment: .leading)

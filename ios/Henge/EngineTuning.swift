@@ -26,6 +26,13 @@ enum EngineTuning {
         return dir
     }
 
+    /// Windows guests' GPU: the same folder, when it also has dxmt-native (Direct3D 11 on Metal), which UTM's
+    /// Direct3D driver in the guest is carried out by.
+    static var windowsGPU: String? {
+        guard let dir = gpuFrameworks, FileManager.default.fileExists(atPath: dir + "/dxmt-native.framework") else { return nil }
+        return dir
+    }
+
     static func apply() {
         var env = defaults
         // HV_VIRGL_PRESENT: frames go to the screen as IOSurfaces (LinuxScreen). 2: read from the GPU into the surface, one

@@ -42,6 +42,10 @@ struct VirtualMac: Identifiable, Codable, Hashable {
     /// A Windows machine's: what the UEFI firmware remembers (its boot entries), and the disc Windows is installed from.
     var vars: URL { directory.appendingPathComponent("vars.fd") }
     var media: URL { directory.appendingPathComponent("install.iso") }
+    /// The disc with the GPU driver (UTM's guest tools), in the drive when there is no installation disc.
+    var tools: URL { directory.appendingPathComponent("tools.iso") }
+    /// A Windows machine's GPU (EngineTuning.windowsGPU): on unless turned off.
+    var gpu: Bool?
 }
 
 /// How much RAM a Mac gets. The engine first asks the kernel to leave it out of Henge's footprint,
