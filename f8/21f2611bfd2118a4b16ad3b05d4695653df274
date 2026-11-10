@@ -1,0 +1,23 @@
+core/machine.c
+  s_862d92eac8a50c::t_71a2004bf376e5 30,41
+core/machine.h
+  s_862d92eac8a50c::t_162ede4f75575c 331
+core/translate.c
+  s_862d92eac8a50c::t_01d387d6636b93 1973,1975-1978
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "f821f2611bfd2118a4b16ad3b05d4695653df274",
+  "prompts": {},
+  "sessions": {
+    "s_862d92eac8a50c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2a2ea67b-10a4-470a-aa9f-ca4aec62a749",
+        "model": "unknown"
+      },
+      "human_author": "chunli <git@chunli.dev>"
+    }
+  }
+}
