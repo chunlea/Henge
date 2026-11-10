@@ -1,0 +1,41 @@
+core/dispatch.c
+  s_d21d8f664d9bf1::t_34106f47f906b2 101-102,114-117,685-687
+core/machine.c
+  s_5f13ddd5a833ec::t_951e1b132ac49c 274
+core/machine.h
+  s_5f13ddd5a833ec::t_a270f655c1efb0 80-81
+host/vm.c
+  s_862d92eac8a50c::t_d4d2f2b4101608 313-320
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "e3f1ca336fc0ac8dafc7145ad0408631a486f467",
+  "prompts": {},
+  "sessions": {
+    "s_5f13ddd5a833ec": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5f607dec-e0c6-419e-ae6a-60c8e0859601",
+        "model": "claude-fable-5-2"
+      },
+      "human_author": "chunli <git@chunli.dev>"
+    },
+    "s_862d92eac8a50c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2a2ea67b-10a4-470a-aa9f-ca4aec62a749",
+        "model": "unknown"
+      },
+      "human_author": "chunli <git@chunli.dev>"
+    },
+    "s_d21d8f664d9bf1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ba473b9e-ddb0-4e5c-865f-5970d12fd7ef",
+        "model": "unknown"
+      },
+      "human_author": "chunli <git@chunli.dev>"
+    }
+  }
+}
