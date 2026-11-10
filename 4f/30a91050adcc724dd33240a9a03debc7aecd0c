@@ -1,0 +1,19 @@
+devices/xhci.c
+  s_6b10bcb45686a0::t_9e4b3a73e8de06 230,232-240,1568
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "4f30a91050adcc724dd33240a9a03debc7aecd0c",
+  "prompts": {},
+  "sessions": {
+    "s_6b10bcb45686a0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5c1399db-7f80-4963-8ae9-9dd2f10e81e9",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "chunli <git@chunli.dev>"
+    }
+  }
+}
