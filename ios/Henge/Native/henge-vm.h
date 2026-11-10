@@ -16,9 +16,10 @@ int henge_vm_boot_linux(const char *disk, uint64_t ram_mb, int cpus, uint32_t wi
                         char *err, size_t errlen);
 /* A machine that starts from UEFI firmware (Windows on Arm; host/uefi_boot.h): the firmware (EDK2's ArmVirtQemu),
    the file its variables are kept in, the disk, and installation media (an ISO; may be NULL) in a USB CD-ROM
-   drive. 0, or -1 with a reason in err. */
+   drive. width x height is the display the firmware offers (0: its own 800 x 600), which is the largest
+   Windows can then be set to. 0, or -1 with a reason in err. */
 int henge_vm_boot_uefi(const char *firmware, const char *vars, const char *disk, const char *cdrom, uint64_t ram_mb,
-                       int cpus, char *err, size_t errlen);
+                       int cpus, uint32_t width, uint32_t height, char *err, size_t errlen);
 /* Unpacks a gzip file (the firmware as the app carries it). 0 or -1. */
 int henge_gunzip(const char *from, const char *to);
 /* Unpacks a Zstandard disk image published in parts (host/linux_image.h) into a sparse disk, deleting each part

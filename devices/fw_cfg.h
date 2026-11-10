@@ -29,6 +29,9 @@ typedef struct HvFwCfg {
     uint16_t ncpus;
     HvFwCfgFile file[HV_FWCFG_FILES];
     int nfiles;
+    /* The guest selected the directory of files, as a driver looking for its file does when it starts. */
+    void (*dir_selected)(void *opaque);
+    void *dir_opaque;
     uint8_t *dir;        /* the directory item, rebuilt when a file is added */
     uint32_t dir_size;
 } HvFwCfg;

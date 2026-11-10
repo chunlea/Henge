@@ -37,6 +37,37 @@ static void ramfb_written(void *opaque) {
     if (b->m->log) fprintf(stderr, "hengevm: ramfb: %ux%u at %llx\n", width, height, (unsigned long long)addr);
 }
 
+/* The display's size. The firmware's display driver (EDK2's QemuRamfbDxe) offers the sizes in a table of its
+   own, 640 x 480 to 1024 x 768, and Windows, with no display driver for this machine, draws for good in the
+   one its boot manager is handed. There is no asking the driver for another size, so its table is made to
+   say the one size wanted: the driver looks for etc/ramfb in fw_cfg's directory as it starts, before it has
+   read the table (it sizes its framebuffer from it), and that is when the table, in the driver's image in
+   the guest's memory, is found and rewritten. Each entry is an EFI_GRAPHICS_OUTPUT_MODE_INFORMATION: 36
+   bytes, a version of 0, then the width and the height. */
+static void ramfb_sizes(void *opaque) {
+    HvVmapple *b = opaque;
+    if (b->screen_set || !b->screen_width || !b->screen_height) return;
+    enum { ENTRY = 36 };
+    static const uint32_t first[3] = {0, 640, 480}, second[3] = {0, 800, 600};
+    /* The firmware loads its drivers at the top of memory: the last gigabyte is where to look. */
+    uint64_t span = b->ram_size < (1ull << 30) ? b->ram_size : 1ull << 30;
+    uint8_t *from = b->ram + (b->ram_size - span), *end = b->ram + b->ram_size - 64 * ENTRY;
+    for (uint8_t *p = from; p < end && (p = memmem(p, (size_t)(end - p), first, sizeof first)); p += 4) {
+        if (memcmp(p + ENTRY, second, sizeof second)) continue;
+        int n = 0;
+        for (; n < 64; n++) {
+            uint32_t e[3];
+            memcpy(e, p + n * ENTRY, sizeof e);
+            if (e[0] || e[1] < 320 || e[1] > 8192 || e[2] < 200 || e[2] > 8192) break;
+            memcpy(p + n * ENTRY + 4, &b->screen_width, 4);
+            memcpy(p + n * ENTRY + 8, &b->screen_height, 4);
+        }
+        b->screen_set = 1;
+        if (b->m->log) fprintf(stderr, "hengevm: ramfb: the firmware's %d display sizes are all %ux%u now\n", n, b->screen_width, b->screen_height);
+        return;
+    }
+}
+
 /* An interrupt is being taken over and over (devices/gicv3.c): what its device looks like. */
 static void storm(void *opaque, int intid) {
     HvVmapple *b = opaque;
@@ -73,6 +104,8 @@ int hv_virt_create(HvVmapple *b, HvMachine *m, HvCpu *cpus, const HvVirtParams *
     b->rtc = hv_pl031_create(m, b->gic, VIRT_RTC, 32 + VIRT_IRQ_RTC);
     b->fwcfg = hv_fw_cfg_create(m, VIRT_FW_CFG, b->ncpus);
     hv_fw_cfg_add_file(b->fwcfg, "etc/ramfb", NULL, 28, ramfb_written, b);
+    b->screen_width = p->screen_width, b->screen_height = p->screen_height;
+    b->fwcfg->dir_selected = ramfb_sizes, b->fwcfg->dir_opaque = b;
     b->pcie = hv_pcie_create(m, b->gic, VIRT_PCIE_ECAM, VIRT_PCIE_ECAM_SIZE, VIRT_PCIE_MMIO, VIRT_PCIE_MMIO_SIZE,
                              32 + VIRT_IRQ_PCIE);
     hv_machine_add_mmio(m, VIRT_PCIE_PIO, 0x10000, b, pio_read, pio_write, "pcie-pio");

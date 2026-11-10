@@ -132,7 +132,7 @@ int henge_vm_boot_linux(const char *disk, uint64_t ram_mb, int cpus, uint32_t wi
 }
 
 int henge_vm_boot_uefi(const char *firmware, const char *vars, const char *disk, const char *cdrom, uint64_t ram_mb,
-                       int cpus, char *err, size_t errlen) {
+                       int cpus, uint32_t width, uint32_t height, char *err, size_t errlen) {
     { extern void hv_prof_ios_start(void); hv_prof_ios_start(); }
     if (begin_start(err, errlen)) return -1;
     HengeDualMapping *jit = henge_ios_jit_get_mapping();
@@ -141,7 +141,7 @@ int henge_vm_boot_uefi(const char *firmware, const char *vars, const char *disk,
         return failed_start();
     }
     HvVmConfig c = {.disk = disk, .ram_mb = ram_mb, .ncpus = cpus, .log = 1, .uefi_code = firmware, .uefi_vars = vars,
-                    .cdrom = cdrom, .jit_rx = jit->rx_addr, .jit_rw = jit->rw_addr, .jit_bytes = jit->size};
+                    .cdrom = cdrom, .fb_width = width, .fb_height = height, .jit_rx = jit->rx_addr, .jit_rw = jit->rw_addr, .jit_bytes = jit->size};
     fprintf(stderr, "henge: booting UEFI firmware with %d CPUs, %llu MB RAM%s, a %zu MB JIT region\n", cpus,
             (unsigned long long)ram_mb, cdrom ? ", installation media" : "", jit->size >> 20);
     if (hv_vm_create(&c, err, errlen) != 0) return failed_start();

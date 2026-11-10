@@ -27,7 +27,7 @@ typedef struct HvVmConfig {
     const char *linux_kernel, *linux_initrd, *linux_cmdline;
     int linux_from_disk;      /* Linux, booting what the disk's bootloader would (kernel NULL) */
     const char *linux_extra;  /* appended to the kernel command line */
-    uint32_t fb_width, fb_height;  /* its display; 0: 1280x800 */
+    uint32_t fb_width, fb_height;  /* its display; 0: 1280x800. A UEFI guest's too; 0: the firmware's 800x600 */
     /* A guest that starts from UEFI firmware (Windows on Arm; host/uefi_boot.h): no ROM or aux then either. */
     const char *uefi_code;    /* the firmware: QEMU's edk2-aarch64-code.fd */
     const char *uefi_vars;    /* where the firmware keeps its variables (NULL: not kept) */

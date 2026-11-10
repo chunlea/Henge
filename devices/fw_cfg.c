@@ -46,7 +46,10 @@ static void dma(HvFwCfg *f, uint64_t pa) {
     if (hv_phys_read(f->m, pa, req, sizeof req) != 0) return;
     uint32_t control = be32(req), len = be32(req + 4), result = 0;
     uint64_t addr = (uint64_t)be32(req + 8) << 32 | be32(req + 12);
-    if (control & DMA_SELECT) f->sel = (uint16_t)(control >> 16), f->off = 0;
+    if (control & DMA_SELECT) {
+        f->sel = (uint16_t)(control >> 16), f->off = 0;
+        if (f->sel == KEY_FILE_DIR && f->dir_selected) f->dir_selected(f->dir_opaque);
+    }
     uint32_t size;
     uint8_t scratch[4];
     const uint8_t *p = item(f, &size, scratch);
@@ -97,6 +100,7 @@ static void fw_cfg_write(void *opaque, uint64_t off, uint64_t v, unsigned size) 
     HvFwCfg *f = opaque;
     if (off == 8 && size == 2) {
         f->sel = (uint16_t)((v & 0xff) << 8 | ((v >> 8) & 0xff));
+        if (f->sel == KEY_FILE_DIR && f->dir_selected) f->dir_selected(f->dir_opaque);
         f->off = 0;
     } else if (off == 16 && size == 8) {
         dma(f, __builtin_bswap64(v));

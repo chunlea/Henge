@@ -24,9 +24,16 @@ enum Device {
         return (1280, min(max(Int((1280 / shape / 8).rounded()) * 8, 720), 960))
     }
 
-    /// A Windows machine's screen: what the UEFI firmware's display starts as, which Windows goes on drawing in
-    /// (it has no display driver for this machine).
-    static let windowsScreen = (width: 800, height: 600)
+    /// A Windows machine's screen: the device's shape, 1440 wide. The UEFI firmware's display is made this size
+    /// (devices/virt.c), and Windows, which has no display driver for this machine and draws with the emulated
+    /// CPUs, can be set to it or to less.
+    static var windowsScreen: (width: Int, height: Int) { windowsScreen(width: 1440) }
+    static func windowsScreen(width: Int) -> (width: Int, height: Int) {
+        let size = UIScreen.main.bounds.size
+        let shape = max(size.width, size.height) / max(min(size.width, size.height), 1)
+        return (width, min(max(Int((Double(width) / shape / 8).rounded()) * 8, width * 9 / 16 / 8 * 8), width * 3 / 4))
+    }
+    static let windowsWidths = [1024, 1280, 1440, 1680, 1920]
 
     /// Preserve the iPad's shape while reducing the virtual GPU's pixel work.
     static var performanceScreen: (width: Int, height: Int) {
