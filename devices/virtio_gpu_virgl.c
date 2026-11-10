@@ -8,6 +8,8 @@
    hand requests over (notify), and CPU 0's tick hands finished ones back (hv_virtio_gpu_poll), as
    virtio-blk does. A fenced request is finished when virglrenderer says its fence has passed. */
 #include "virtio_gpu_virgl.h"
+#include <CoreFoundation/CoreFoundation.h>
+#include <IOSurface/IOSurfaceRef.h>
 
 #include <dlfcn.h>
 #include <pthread.h>
@@ -45,6 +47,11 @@ struct virgl_renderer_callbacks {
 #define VIRGL_BIND_SHARED (1 << 20)
 #define RESOURCE_FLAG_Y_0_TOP 1
 
+struct virgl_renderer_resource_info {
+    uint32_t handle, virgl_format, width, height, depth, flags, tex_id, stride;
+    int drm_fourcc;
+};
+
 static struct {
     int (*init)(void *, int, struct virgl_renderer_callbacks *);
     void (*get_cap_set)(uint32_t, uint32_t *, uint32_t *);
@@ -64,6 +71,8 @@ static struct {
     void (*poll)(void);
     void *(*get_cursor_data)(uint32_t, uint32_t *, uint32_t *);
     void (*cleanup)(void *); /* optional */
+    int (*resource_get_info)(int, struct virgl_renderer_resource_info *);
+    void (*force_ctx_0)(void);
 } vr;
 
 /* --- EGL (ANGLE), what is used of it --- */
@@ -77,7 +86,56 @@ static struct {
     EGLContext (*CreateContext)(EGLDisplay, EGLConfig, EGLContext, const EGLint *);
     unsigned (*DestroyContext)(EGLDisplay, EGLContext);
     unsigned (*MakeCurrent)(EGLDisplay, void *, void *, EGLContext);
+    void *(*CreatePbufferFromClientBuffer)(EGLDisplay, unsigned, void *, EGLConfig, const EGLint *);
+    unsigned (*DestroySurface)(EGLDisplay, void *);
+    unsigned (*BindTexImage)(EGLDisplay, void *, EGLint);
+    unsigned (*ReleaseTexImage)(EGLDisplay, void *, EGLint);
+    unsigned (*GetConfigAttrib)(EGLDisplay, EGLConfig, EGLint, EGLint *);
 } egl;
+
+/* --- OpenGL ES, what presenting uses of it (the rest is virglrenderer's business) --- */
+static struct {
+    void (*GenFramebuffers)(int, unsigned *);
+    void (*DeleteFramebuffers)(int, const unsigned *);
+    void (*BindFramebuffer)(unsigned, unsigned);
+    void (*FramebufferTexture2D)(unsigned, unsigned, unsigned, unsigned, int);
+    unsigned (*CheckFramebufferStatus)(unsigned);
+    void (*BlitFramebuffer)(int, int, int, int, int, int, int, int, unsigned, unsigned);
+    void (*GenTextures)(int, unsigned *);
+    void (*DeleteTextures)(int, const unsigned *);
+    void (*BindTexture)(unsigned, unsigned);
+    void (*GetIntegerv)(unsigned, int *);
+    unsigned char (*IsEnabled)(unsigned);
+    void (*Enable)(unsigned);
+    void (*Disable)(unsigned);
+    void (*Flush)(void);
+    unsigned (*GetError)(void);
+} gl;
+#define EGL_IOSURFACE_ANGLE 0x3454
+#define EGL_IOSURFACE_PLANE_ANGLE 0x345A
+#define EGL_TEXTURE_TYPE_ANGLE 0x345C
+#define EGL_TEXTURE_INTERNAL_FORMAT_ANGLE 0x345D
+#define EGL_BIND_TO_TEXTURE_TARGET_ANGLE 0x348D
+#define EGL_WIDTH 0x3057
+#define EGL_HEIGHT 0x3056
+#define EGL_TEXTURE_FORMAT 0x3080
+#define EGL_TEXTURE_TARGET 0x3081
+#define EGL_TEXTURE_RGBA 0x305E
+#define EGL_TEXTURE_2D 0x305F
+#define EGL_BACK_BUFFER 0x3084
+#define GL_TEXTURE_2D 0x0DE1
+#define GL_UNSIGNED_BYTE 0x1401
+#define GL_BGRA_EXT 0x80E1
+#define GL_READ_FRAMEBUFFER 0x8CA8
+#define GL_DRAW_FRAMEBUFFER 0x8CA9
+#define GL_DRAW_FRAMEBUFFER_BINDING 0x8CA6
+#define GL_READ_FRAMEBUFFER_BINDING 0x8CAA
+#define GL_COLOR_ATTACHMENT0 0x8CE0
+#define GL_FRAMEBUFFER_COMPLETE 0x8CD5
+#define GL_TEXTURE_BINDING_2D 0x8069
+#define GL_SCISSOR_TEST 0x0C11
+#define GL_COLOR_BUFFER_BIT 0x4000
+#define GL_NEAREST 0x2600
 #define EGL_NONE 0x3038
 #define EGL_RENDERABLE_TYPE 0x3040
 #define EGL_OPENGL_ES3_BIT 0x0040
@@ -121,6 +179,15 @@ struct HvGpuVirgl {
     uint32_t scanout_res;
     uint32_t *readback;
     size_t readback_px;
+    /* Presenting without a readback (HV_VIRGL_PRESENT): each flush is a GPU copy of the scanout into one of two
+       IOSurfaces, by turns, and the host shows the one finished last (hv_gpu_virgl_surface). */
+    int present;                          /* asked for, and ANGLE can bind IOSurfaces */
+    pthread_mutex_t present_mu;           /* the surfaces, between the worker and whoever shows or reads them */
+    IOSurfaceRef surf[2];
+    void *pbuf[2];
+    unsigned surf_tex[2], surf_fbo[2], read_fbo;
+    uint32_t surf_w, surf_h;
+    int back, front;                      /* front: -1 until a frame is there */
     char dir[1024];
 };
 
@@ -164,19 +231,33 @@ static int bring_up(HvGpuVirgl *v) {
     /* ANGLE on Metal: its default on a Mac is OpenGL, which lacks the EGL images virglrenderer needs (as UTM sets). */
     setenv("ANGLE_DEFAULT_PLATFORM", "metal", 0);
     void *e = load(d, "EGL.framework/EGL", 1);
-    if (!e || !load(d, "GLESv2.framework/GLESv2", 1) || !load(d, "epoxy.0.framework/epoxy.0", 1)) return -1;
+    void *gles = e ? load(d, "GLESv2.framework/GLESv2", 1) : NULL;
+    if (!gles || !load(d, "epoxy.0.framework/epoxy.0", 1)) return -1;
     load(d, "vulkan.1.framework/vulkan.1", 1); /* virglrenderer links it (for Venus, unused here) */
     void *r = load(d, "virglrenderer.1.framework/virglrenderer.1", 0);
     if (!r) return -1;
 #define E(n) if (!(*(void **)&egl.n = dlsym(e, "egl" #n))) { fprintf(stderr, "hengevm: virgl: no egl" #n "\n"); return -1; }
     E(GetDisplay) E(Initialize) E(BindAPI) E(ChooseConfig) E(CreateContext) E(DestroyContext) E(MakeCurrent)
 #undef E
+    /* Presenting: optional, so a missing piece only means the readback stays. */
+    v->present = getenv("HV_VIRGL_PRESENT") && atoi(getenv("HV_VIRGL_PRESENT"));
+#define EO(n) if (!(*(void **)&egl.n = dlsym(e, "egl" #n))) v->present = 0;
+    EO(CreatePbufferFromClientBuffer) EO(DestroySurface) EO(BindTexImage) EO(ReleaseTexImage) EO(GetConfigAttrib)
+#undef EO
+#define G(n) if (!(*(void **)&gl.n = dlsym(gles, "gl" #n))) v->present = 0;
+    G(GenFramebuffers) G(DeleteFramebuffers) G(BindFramebuffer) G(FramebufferTexture2D) G(CheckFramebufferStatus)
+    G(BlitFramebuffer) G(GenTextures) G(DeleteTextures) G(BindTexture) G(GetIntegerv) G(IsEnabled) G(Enable) G(Disable)
+    G(Flush) G(GetError)
+#undef G
 #define V(n) if (!(*(void **)&vr.n = dlsym(r, "virgl_renderer_" #n))) { fprintf(stderr, "hengevm: virgl: no virgl_renderer_" #n "\n"); return -1; }
     V(init) V(get_cap_set) V(fill_caps) V(context_create) V(context_destroy) V(ctx_attach_resource) V(ctx_detach_resource)
     V(resource_create) V(resource_unref) V(resource_attach_iov) V(resource_detach_iov) V(transfer_write_iov)
     V(transfer_read_iov) V(submit_cmd) V(create_fence) V(poll) V(get_cursor_data)
 #undef V
     *(void **)&vr.cleanup = dlsym(r, "virgl_renderer_cleanup");
+    *(void **)&vr.resource_get_info = dlsym(r, "virgl_renderer_resource_get_info");
+    *(void **)&vr.force_ctx_0 = dlsym(r, "virgl_renderer_force_ctx_0");
+    if (!vr.resource_get_info || !vr.force_ctx_0) v->present = 0;
     v->dpy = egl.GetDisplay(NULL);
     EGLint major, minor, n = 0;
     if (!v->dpy || !egl.Initialize(v->dpy, &major, &minor)) { fprintf(stderr, "hengevm: virgl: no EGL display\n"); return -1; }
@@ -271,16 +352,140 @@ static uint32_t create(HvGpuVirgl *v, struct virgl_renderer_resource_create_args
     return RESP_OK_NODATA;
 }
 
+static void present_drop(HvGpuVirgl *v) {
+    pthread_mutex_lock(&v->present_mu);
+    v->front = -1;
+    for (int i = 0; i < 2; i++) {
+        if (v->surf_fbo[i]) gl.DeleteFramebuffers(1, &v->surf_fbo[i]);
+        if (v->pbuf[i]) egl.ReleaseTexImage(v->dpy, v->pbuf[i], EGL_BACK_BUFFER);
+        if (v->surf_tex[i]) gl.DeleteTextures(1, &v->surf_tex[i]);
+        if (v->pbuf[i]) egl.DestroySurface(v->dpy, v->pbuf[i]);
+        if (v->surf[i]) CFRelease(v->surf[i]);
+        v->surf_fbo[i] = v->surf_tex[i] = 0, v->pbuf[i] = NULL, v->surf[i] = NULL;
+    }
+    if (v->read_fbo) gl.DeleteFramebuffers(1, &v->read_fbo);
+    v->read_fbo = 0, v->surf_w = v->surf_h = 0;
+    pthread_mutex_unlock(&v->present_mu);
+}
+
+static CFNumberRef num(int32_t x) { return CFNumberCreate(NULL, kCFNumberSInt32Type, &x); }
+
+/* Two BGRA IOSurfaces of the scanout's size, each bound to a texture in a framebuffer. In context 0, current. */
+static int present_make(HvGpuVirgl *v, uint32_t w, uint32_t h) {
+    present_drop(v);
+    EGLint target = EGL_TEXTURE_2D;
+    egl.GetConfigAttrib(v->dpy, v->cfg, EGL_BIND_TO_TEXTURE_TARGET_ANGLE, &target);
+    if (target != EGL_TEXTURE_2D) return -1; /* a rectangle texture (ANGLE on desktop OpenGL): not handled */
+    pthread_mutex_lock(&v->present_mu);
+    int ok = 1;
+    for (int i = 0; i < 2 && ok; i++) {
+        const void *keys[] = {kIOSurfaceWidth, kIOSurfaceHeight, kIOSurfaceBytesPerElement, kIOSurfacePixelFormat};
+        CFNumberRef vals[] = {num((int32_t)w), num((int32_t)h), num(4), num((int32_t)0x42475241 /* 'BGRA' */)};
+        CFDictionaryRef d = CFDictionaryCreate(NULL, keys, (const void **)vals, 4, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+        v->surf[i] = IOSurfaceCreate(d);
+        CFRelease(d);
+        for (int k = 0; k < 4; k++) CFRelease(vals[k]);
+        const EGLint a[] = {EGL_WIDTH, (EGLint)w, EGL_HEIGHT, (EGLint)h, EGL_IOSURFACE_PLANE_ANGLE, 0, EGL_TEXTURE_TARGET, EGL_TEXTURE_2D,
+                            EGL_TEXTURE_INTERNAL_FORMAT_ANGLE, GL_BGRA_EXT, EGL_TEXTURE_FORMAT, EGL_TEXTURE_RGBA,
+                            EGL_TEXTURE_TYPE_ANGLE, GL_UNSIGNED_BYTE, EGL_NONE};
+        if (v->surf[i]) v->pbuf[i] = egl.CreatePbufferFromClientBuffer(v->dpy, EGL_IOSURFACE_ANGLE, (void *)v->surf[i], v->cfg, a);
+        if (!v->pbuf[i]) { ok = 0; break; }
+        gl.GenTextures(1, &v->surf_tex[i]);
+        gl.BindTexture(GL_TEXTURE_2D, v->surf_tex[i]);
+        ok = egl.BindTexImage(v->dpy, v->pbuf[i], EGL_BACK_BUFFER) != 0;
+        gl.GenFramebuffers(1, &v->surf_fbo[i]);
+        gl.BindFramebuffer(GL_DRAW_FRAMEBUFFER, v->surf_fbo[i]);
+        gl.FramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, v->surf_tex[i], 0);
+        if (ok) ok = gl.CheckFramebufferStatus(GL_DRAW_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
+    }
+    if (ok) gl.GenFramebuffers(1, &v->read_fbo), v->surf_w = w, v->surf_h = h, v->back = 0;
+    pthread_mutex_unlock(&v->present_mu);
+    if (!ok) present_drop(v);
+    return ok ? 0 : -1;
+}
+
+/* The whole scanout into the back surface, on the GPU; then that one is the front. 0 if done. */
+static int present_flush(HvGpuVirgl *v, Res *r) {
+    struct virgl_renderer_resource_info info = {0};
+    if (vr.resource_get_info((int)r->id, &info) || !info.tex_id) return -1;
+    vr.force_ctx_0(); /* virglrenderer's own context, and it knows it is current again */
+    int read0 = 0, draw0 = 0, tex0 = 0;
+    gl.GetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &read0);
+    gl.GetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &draw0);
+    gl.GetIntegerv(GL_TEXTURE_BINDING_2D, &tex0);
+    int scissor = gl.IsEnabled(GL_SCISSOR_TEST);
+    int rc = -1;
+    if ((v->surf_w == r->w && v->surf_h == r->h) || present_make(v, r->w, r->h) == 0) {
+        int b = v->back;
+        if (scissor) gl.Disable(GL_SCISSOR_TEST); /* it clips a blit too */
+        gl.BindFramebuffer(GL_READ_FRAMEBUFFER, v->read_fbo);
+        gl.FramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, info.tex_id, 0);
+        gl.BindFramebuffer(GL_DRAW_FRAMEBUFFER, v->surf_fbo[b]);
+        /* The IOSurface's first row is the picture's top, and so is the first row of the texture a guest's GPU
+           driver scans out (seen: Hyprland on virgl); a Y_0_TOP resource (a 2D one) is kept the other way up. */
+        int flip = (info.flags & RESOURCE_FLAG_Y_0_TOP) != 0;
+        gl.BlitFramebuffer(0, flip ? (int)r->h : 0, (int)r->w, flip ? 0 : (int)r->h, 0, 0, (int)r->w, (int)r->h, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+        gl.FramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, 0, 0);
+        if (!gl.GetError()) {
+            gl.Flush();
+            pthread_mutex_lock(&v->present_mu);
+            v->front = b, v->back = !b;
+            pthread_mutex_unlock(&v->present_mu);
+            rc = 0;
+        }
+        if (scissor) gl.Enable(GL_SCISSOR_TEST);
+    }
+    gl.BindFramebuffer(GL_READ_FRAMEBUFFER, (unsigned)read0);
+    gl.BindFramebuffer(GL_DRAW_FRAMEBUFFER, (unsigned)draw0);
+    gl.BindTexture(GL_TEXTURE_2D, (unsigned)tex0);
+    return rc;
+}
+
+IOSurfaceRef hv_gpu_virgl_surface(HvGpuVirgl *v) {
+    if (!v || !v->present) return NULL;
+    pthread_mutex_lock(&v->present_mu);
+    IOSurfaceRef s = v->front >= 0 ? v->surf[v->front] : NULL;
+    if (s) CFRetain(s);
+    pthread_mutex_unlock(&v->present_mu);
+    return s;
+}
+
+/* The newest presented frame, copied out (a screenshot, a host without a layer to show the surface in). 1 if
+   there was one. */
+int hv_gpu_virgl_read(HvGpuVirgl *v, uint32_t *out, uint32_t w, uint32_t h) {
+    IOSurfaceRef s = hv_gpu_virgl_surface(v);
+    if (!s) return 0;
+    IOSurfaceLock(s, kIOSurfaceLockReadOnly, NULL);
+    const uint8_t *base = IOSurfaceGetBaseAddress(s);
+    size_t stride = IOSurfaceGetBytesPerRow(s), sw = IOSurfaceGetWidth(s), sh = IOSurfaceGetHeight(s);
+    memset(out, 0, (size_t)w * h * 4);
+    for (uint32_t y = 0; y < h && y < sh; y++) memcpy(out + (size_t)y * w, base + y * stride, (w < sw ? w : sw) * 4);
+    IOSurfaceUnlock(s, kIOSurfaceLockReadOnly, NULL);
+    CFRelease(s);
+    return 1;
+}
+
 /* The scanout's resource, the flushed rectangle of it, onto the display. */
 static uint32_t flush(HvGpuVirgl *v, const uint8_t *req) {
     HvVirtioGpu *g = v->g;
-    Rect rc;
+    GpuRect rc;
     uint32_t id;
     memcpy(&rc, req + 24, 16);
     memcpy(&id, req + 40, 4);
     Res *r = find(v, id);
     if (!r) return RESP_ERR_INVALID_RESOURCE_ID;
     if (id != v->scanout_res) return RESP_OK_NODATA;
+    if (v->present) {
+        if (present_flush(v, r) == 0) {
+            g->flushes++;
+            g->changes++;
+            return RESP_OK_NODATA;
+        }
+        static int said;
+        if (!said++) fprintf(stderr, "hengevm: virgl: cannot present through an IOSurface; reading frames back instead\n");
+        present_drop(v);
+        v->present = 0;
+    }
     uint32_t w = r->w < g->width ? r->w : g->width, h = r->h < g->height ? r->h : g->height;
     if (rc.x >= w || rc.y >= h) return RESP_OK_NODATA;
     if (rc.w > w - rc.x) rc.w = w - rc.x;
@@ -401,7 +606,7 @@ static uint32_t control(HvGpuVirgl *v, Req *q) {
     }
     case CMD_RESOURCE_FLUSH: type = flush(v, req); break;
     case CMD_TRANSFER_TO_HOST_2D: {
-        Rect r;
+        GpuRect r;
         uint64_t offset;
         uint32_t id;
         memcpy(&r, req + 24, 16);
@@ -534,6 +739,7 @@ static void cursor(HvGpuVirgl *v, const HvVirtqElem *e) {
     g->cursor_x = (int32_t)pos[1], g->cursor_y = (int32_t)pos[2];
     g->changes++;
     if (h.type != CMD_UPDATE_CURSOR) return;
+    g->cursor_gen++;
     g->cursor_on = 0;
     if (!id || !find(v, id)) return;
     uint32_t w = 0, hh = 0;
@@ -597,6 +803,8 @@ static void *worker(void *arg) {
         if (finished) hv_machine_wake(v->g->m);
     }
     /* Stopped (the machine is being released): everything this thread made, so another machine can start 3D. */
+    if (vr.force_ctx_0) vr.force_ctx_0();
+    present_drop(v);
     while (v->res) {
         Res *r = v->res;
         detach(v, r);
@@ -658,6 +866,8 @@ HvGpuVirgl *hv_gpu_virgl_start(HvVirtioGpu *g, const char *dir) {
     snprintf(v->dir, sizeof v->dir, "%s", dir);
     v->ring = calloc(RING, sizeof *v->ring);
     pthread_mutex_init(&v->mu, NULL);
+    pthread_mutex_init(&v->present_mu, NULL);
+    v->front = -1;
     pthread_cond_init(&v->cv, NULL);
     pthread_attr_t at;
     pthread_attr_init(&at);
@@ -681,6 +891,7 @@ void hv_gpu_virgl_stop(HvGpuVirgl *v) {
     pthread_mutex_unlock(&v->mu);
     pthread_join(v->thread, NULL);
     pthread_mutex_destroy(&v->mu);
+    pthread_mutex_destroy(&v->present_mu);
     pthread_cond_destroy(&v->cv);
     free(v->ring);
     free(v->readback);

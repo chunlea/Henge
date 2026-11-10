@@ -374,6 +374,25 @@ uint64_t henge_vm_gpu_frames(void) {
     return result;
 }
 
+void *henge_vm_linux_surface(void) {
+    if (!lock_running()) return NULL;
+    void *s = hv_vm_linux_surface();
+    pthread_rwlock_unlock(&api_lock);
+    return s;
+}
+
+int henge_vm_linux_cursor(int32_t *x, int32_t *y, int32_t *hot_x, int32_t *hot_y, uint64_t *gen, uint32_t *pixels) {
+    if (!lock_running()) return 0;
+    HvLinuxCursor c;
+    int on = hv_vm_linux_cursor(&c) == 0 && c.on;
+    if (on) {
+        *x = c.x, *y = c.y, *hot_x = c.hot_x, *hot_y = c.hot_y, *gen = c.gen;
+        if (pixels) memcpy(pixels, c.pixels, 64 * 64 * 4);
+    }
+    pthread_rwlock_unlock(&api_lock);
+    return on;
+}
+
 uint64_t henge_vm_display_changes(void) {
     if (!lock_running()) return 0;
     uint64_t result = hv_vm_display_changes();

@@ -28,7 +28,8 @@ enum EngineTuning {
 
     static func apply() {
         var env = defaults
-        if let gpu = gpuFrameworks { env["HV_VIRGL"] = gpu }
+        // HV_VIRGL_PRESENT: frames go to the screen as IOSurfaces (LinuxScreen), not read back; 0 in henge-env.txt: as before.
+        if let gpu = gpuFrameworks { env["HV_VIRGL"] = gpu; env["HV_VIRGL_PRESENT"] = "1" }
         let d = UserDefaults.standard
         if [30, 120].contains(d.integer(forKey: refreshKey)) { env["HV_HZ"] = String(d.integer(forKey: refreshKey)) }
         if d.bool(forKey: superblocksKey) { env["HV_SUPERBLOCKS"] = "1" } else { unsetenv("HV_SUPERBLOCKS") }

@@ -22,6 +22,7 @@
 #include "dispatch.h"
 #include "net_slirp.h"
 #include "linux_boot.h"
+#include "../devices/virtio_gpu_virgl.h"
 
 static HvMachine m;
 static HvCpu cpus[HV_MAX_CPUS]; /* the board takes them as an array */
@@ -257,6 +258,18 @@ void hv_vm_set_display_layer(void *layer) {
     if (pvg) hv_pvg_lite_set_layer(pvg, layer);
     os_unfair_lock_unlock(&display_lock);
     if (previous) CFRelease(previous);
+}
+
+struct __IOSurface *hv_vm_linux_surface(void) { return board.gpu ? hv_gpu_virgl_surface(board.gpu->virgl) : NULL; }
+
+int hv_vm_linux_cursor(HvLinuxCursor *c) {
+    HvVirtioGpu *g = board.gpu;
+    if (!g) return -1;
+    c->on = g->cursor_on && g->scanout_res;
+    c->x = g->cursor_x, c->y = g->cursor_y, c->hot_x = g->hot_x, c->hot_y = g->hot_y;
+    c->gen = g->cursor_gen;
+    c->pixels = g->cursor;
+    return 0;
 }
 
 uint64_t hv_vm_display_changes(void) { return board.gpu ? board.gpu->changes + 1 : 0; }

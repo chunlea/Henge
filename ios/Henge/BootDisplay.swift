@@ -14,6 +14,8 @@ struct BootDisplay: View {
 
     @State private var image: CGImage?
     @State private var gpuLive = false
+    /// Linux drawing with the GPU: its frames are in a surface LinuxScreen shows, with nothing to copy here.
+    @State private var linuxSurface = false
     @State private var stopped = false
     @AppStorage("henge.matchScreenColors") private var matchScreenColors = true
     @AppStorage("henge.display.brightness") private var screenBrightness = 1.0
@@ -22,7 +24,9 @@ struct BootDisplay: View {
         ZStack {
             Color.black
             if !stopped {
-                if !gpuLive {
+                if linuxSurface {
+                    LinuxScreen()
+                } else if !gpuLive {
                     if let image {
                         Image(decorative: image, scale: 1).resizable().interpolation(.medium).aspectRatio(contentMode: .fit)
                         if image.height > image.width {
@@ -53,6 +57,7 @@ struct BootDisplay: View {
                 if next != generation {
                     generation = next
                     gpuLive = false
+                    linuxSurface = false
                     image = nil
                     seen = 0
                 }
@@ -61,13 +66,19 @@ struct BootDisplay: View {
                     stopped = true
                     image = nil
                     gpuLive = false
+                    linuxSurface = false
                 } else {
                     stopped = false
                     if !gpuLive && henge_vm_gpu_frames() > 0 {
                         gpuLive = true
                         image = nil
                     }
-                    if !gpuLive {
+                    if !gpuLive && !linuxSurface, let raw = henge_vm_linux_surface() {
+                        Unmanaged<AnyObject>.fromOpaque(raw).release()
+                        linuxSurface = true
+                        image = nil
+                    }
+                    if !gpuLive && !linuxSurface {
                         changes = henge_vm_display_changes()
                         if changes == 0 || changes != seen || image == nil {
                             seen = changes
@@ -75,7 +86,7 @@ struct BootDisplay: View {
                         }
                     }
                 }
-                try? await Task.sleep(nanoseconds: gpuLive ? 250_000_000 : changes == 0 ? 100_000_000 : 33_000_000)
+                try? await Task.sleep(nanoseconds: gpuLive || linuxSurface ? 250_000_000 : changes == 0 ? 100_000_000 : 33_000_000)
             }
         }
     }
