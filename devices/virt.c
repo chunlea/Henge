@@ -67,7 +67,11 @@ int hv_virt_create(HvVmapple *b, HvMachine *m, HvCpu *cpus, const HvVirtParams *
     b->pcie = hv_pcie_create(m, b->gic, VIRT_PCIE_ECAM, VIRT_PCIE_ECAM_SIZE, VIRT_PCIE_MMIO, VIRT_PCIE_MMIO_SIZE,
                              32 + VIRT_IRQ_PCIE);
     hv_machine_add_mmio(m, VIRT_PCIE_PIO, 0x10000, b, pio_read, pio_write, "pcie-pio");
-    if (p->disk && !(b->root_blk = hv_virtio_blk_create(m, b->pcie, p->disk, HV_VBLK_PLAIN))) return -1;
+    /* HV_VIRT_DISK=virtio: the disk as a virtio one instead (debugging). */
+    const char *kind = getenv("HV_VIRT_DISK");
+    if (p->disk && kind && !strcmp(kind, "virtio")) {
+        if (!(b->root_blk = hv_virtio_blk_create(m, b->pcie, p->disk, HV_VBLK_PLAIN))) return -1;
+    } else if (p->disk && !(b->nvme = hv_nvme_create(m, b->pcie, p->disk))) return -1;
     if (p->cdrom && !(b->aux_blk = hv_virtio_blk_create(m, b->pcie, p->cdrom, HV_VBLK_PLAIN))) return -1;
     if (p->mac) b->net = hv_virtio_net_create(m, b->pcie, p->mac);
     b->keyboard = hv_virtio_input_create(m, b->pcie, HV_VINPUT_KEYBOARD);

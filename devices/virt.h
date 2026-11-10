@@ -4,6 +4,7 @@
 #include <stdint.h>
 
 #include "fw_cfg.h"
+#include "nvme.h"
 #include "pflash.h"
 #include "vmapple.h"
 
@@ -40,7 +41,7 @@
 typedef struct HvVirtParams {
     int ncpus;
     uint64_t ram_size;
-    HvDisk *disk;            /* NULL: none */
+    HvDisk *disk;            /* NULL: none. An NVMe disk: what Windows has a driver for */
     HvDisk *cdrom;           /* a second, read-only disk: installation media (NULL: none) */
     const uint8_t *mac;      /* NULL: no network card */
     const char *vars_path;   /* where the firmware's variables are kept (NULL: nowhere) */

@@ -393,6 +393,7 @@ void hv_vmapple_destroy(HvVmapple *b) {
     free(b->sealed);
     free(b->cfg);
     hv_fw_cfg_destroy(b->fwcfg);
+    hv_nvme_destroy(b->nvme);
     hv_pflash_destroy(b->vars);
     if (b->fw_code && b->fw_code != MAP_FAILED) munmap(b->fw_code, VIRT_FLASH_SIZE);
     if (b->rom && b->rom != MAP_FAILED) munmap(b->rom, ROM_SIZE);
