@@ -215,6 +215,16 @@ typedef struct HvPerCpu {
 #define HV_BLOCK_FILLS 32
     uint64_t block_fill[HV_BLOCK_FILLS];
     uint32_t nblock_fills;
+    /* The same for the kernel half, where a kernel may map all of memory in blocks (and Windows takes single
+       ones apart and gives their memory to something else, with one TLBI by VA each): for each 2 MB of address
+       space, the block an entry in it was filled from (kblock, by a hash of the address; same encoding), and a
+       short list of the blocks bigger than that. Two blocks wanting one place, or the list full: kblock_unknown,
+       and any TLBI by VA in the kernel half drops everything, which also starts these over. */
+#define HV_KBLOCK_SLOTS 1024
+#define HV_KBLOCK_BIG 16
+    uint64_t kblock[HV_KBLOCK_SLOTS];
+    uint64_t kblock_big[HV_KBLOCK_BIG];
+    uint32_t nkblock, nkblock_big, kblock_unknown;
     uint64_t stash_clock;
 } HvPerCpu;
 

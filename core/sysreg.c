@@ -393,6 +393,7 @@ void hv_tlbi_apply(HvCpu *cpu, uint32_t op1, uint32_t crn, uint32_t crm, uint32_
         int gb = hv_mmu_granule_bits(cpu, va);
         uint64_t first = gb > HV_TLB_PAGE_BITS ? va & ~((1ull << gb) - 1) : va;
         uint64_t n = gb > HV_TLB_PAGE_BITS ? 1ull << (gb - HV_TLB_PAGE_BITS) : 1;
+        hv_tlb_drop_kernel_block(cpu, first);
         for (uint64_t i = 0; i < n; i++) hv_tlb_flush_va_page(cpu, first + (i << HV_TLB_PAGE_BITS), all_asids ? -1 : (int)(xt >> 48));
     } else if (by_asid) {
         hv_tlb_flush_user(cpu);

@@ -198,6 +198,42 @@ int main(void) {
         }
     }
 
+    /* The same in the kernel half (TTBR1), where Windows maps much of its memory in 2 MB blocks and takes one
+       apart with a single TLBI by VA: the pages of the block that were left went on being written through. */
+    {
+        uint64_t k4 = alloc_table();
+        uint64_t saved_tcr = cpu.tcr_el1, saved_ttbr1 = cpu.ttbr1_el1;
+        cpu.ttbr1_el1 = k4;
+        cpu.tcr_el1 = 25 | 0u << 14 | 25u << 16 | 2u << 30 | 5ull << 32; /* 39 bits and 4 KB pages, both halves */
+        uint64_t kva = 0xffffff8040400000ull;
+        map(k4, 12, 39, kva & 0x7fffffffffull, 2, 0x90000000ull | BLOCK | AF, 0);
+        hv_tlb_flush(&cpu);
+        int filled = 0;
+        for (int k = 0; k < 8; k++) {
+            uint64_t va = kva + ((uint64_t)k << HV_TLB_PAGE_BITS) + 0x10;
+            hv_mmu_access(&cpu, va, HV_ACC_READ, 1, &pa);
+            filled += hv_tlb_ent(&cpu, (va >> HV_TLB_PAGE_BITS) & (HV_TLB_SIZE - 1), 1)->read_tag != HV_TLB_INVALID;
+        }
+        checks++;
+        if (filled != 8) {
+            printf("  FAIL kernel 2 MB block: %d of 8 pages in the TLB\n", filled);
+            failures++;
+        }
+        cpu.el = 1;
+        cpu.x[1] = ((kva + (3ull << HV_TLB_PAGE_BITS)) >> 12) & 0xfffffffffffull;
+        hv_sysreg_sys(&cpu, 0xd5088321u, 0); /* tlbi vae1is, x1 */
+        for (int k = 0; k < 8; k++) {
+            uint64_t va = kva + ((uint64_t)k << HV_TLB_PAGE_BITS);
+            checks++;
+            if (hv_tlb_ent(&cpu, (va >> HV_TLB_PAGE_BITS) & (HV_TLB_SIZE - 1), 1)->read_tag != HV_TLB_INVALID) {
+                printf("  FAIL TLBI by VA in a kernel 2 MB block kept page %d\n", k);
+                failures++;
+            }
+        }
+        cpu.tcr_el1 = saved_tcr, cpu.ttbr1_el1 = saved_ttbr1;
+        hv_tlb_flush(&cpu);
+    }
+
     /* 64 KB granule, 42-bit TTBR0 (levels 2-3): pages and 512 MB blocks. */
     uint64_t r6 = alloc_table();
     cpu.ttbr0_el1 = r6;

@@ -144,6 +144,8 @@ void hv_mmu_walk(HvCpu *cpu, uint64_t va, HvAccess acc, int el, HvWalk *out) {
 
 int hv_tlb_tmajor;
 
+static void kblock_clear(HvPerCpu *p);
+
 void hv_tlb_flush(HvCpu *cpu) {
     if (cpu->m) cpu->m->stats.tlb_flushes++;
     if (cpu->m) cpu->m->stats.reset_why[0]++;
@@ -160,6 +162,7 @@ void hv_tlb_flush(HvCpu *cpu) {
     cpu->nuser_fills = 0;
     cpu->nkernel_fills = 0;
     hv_tlb_stash_drop(cpu, -1);
+    kblock_clear(cpu->pc_state);
 }
 
 /* Clear the tables of one half (user tables are the even flags values, kernel ones odd). */
@@ -504,6 +507,97 @@ static void note_block(HvPerCpu *p, uint64_t va, uint64_t size) {
     __atomic_store_n(&p->nblock_fills, n + 1, __ATOMIC_SEQ_CST);
 }
 
+/* ---- kernel-half blocks (HvPerCpu.kblock) ---- */
+
+static uint32_t kblock_slot(uint64_t lo) {
+    return (uint32_t)(((lo >> 21) * 0x9e3779b97f4a7c15ull) >> 54) & (HV_KBLOCK_SLOTS - 1);
+}
+
+/* An entry is about to be filled from a kernel block of `size` bytes holding va. */
+static void note_kblock(HvPerCpu *p, uint64_t va, uint64_t size) {
+    if (__atomic_load_n(&p->kblock_unknown, __ATOMIC_RELAXED)) return;
+    int bits = 63 - __builtin_clzll(size);
+    uint64_t lo = va & 0x00ffffffffffffffull, key = (lo & ~(size - 1)) | (uint64_t)bits;
+    if (bits > 21) {
+        uint32_t n = p->nkblock_big;
+        for (uint32_t k = 0; k < n; k++)
+            if (p->kblock_big[k] == key) return;
+        if (n == HV_KBLOCK_BIG) {
+            __atomic_store_n(&p->kblock_unknown, 1, __ATOMIC_SEQ_CST);
+            return;
+        }
+        __atomic_store_n(&p->kblock_big[n], key, __ATOMIC_RELAXED);
+        __atomic_store_n(&p->nkblock_big, n + 1, __ATOMIC_SEQ_CST);
+        return;
+    }
+    uint64_t *slot = &p->kblock[kblock_slot(lo)], cur = *slot;
+    if (cur == key) return;
+    if (cur) {
+        __atomic_store_n(&p->kblock_unknown, 1, __ATOMIC_SEQ_CST);
+        return;
+    }
+    __atomic_store_n(slot, key, __ATOMIC_SEQ_CST);
+    __atomic_store_n(&p->nkblock, p->nkblock + 1, __ATOMIC_SEQ_CST);
+}
+
+/* Whether p's TLB may hold entries from a kernel block holding va: 0 no, 1 yes (*key: which, as recorded),
+   2 not known. Other CPUs ask too (hv_tlbi_drop_remote_va). */
+static int kblock_find(const HvPerCpu *p, uint64_t va, uint64_t *key) {
+    if (__atomic_load_n(&p->kblock_unknown, __ATOMIC_SEQ_CST)) return 2;
+    uint64_t lo = va & 0x00ffffffffffffffull;
+    if (__atomic_load_n(&p->nkblock, __ATOMIC_SEQ_CST)) {
+        uint64_t b = __atomic_load_n(&p->kblock[kblock_slot(lo)], __ATOMIC_SEQ_CST);
+        if (b && lo - (b & ~63ull) < 1ull << (b & 63)) {
+            *key = b;
+            return 1;
+        }
+    }
+    uint32_t n = __atomic_load_n(&p->nkblock_big, __ATOMIC_SEQ_CST);
+    for (uint32_t k = 0; k < n && k < HV_KBLOCK_BIG; k++) {
+        uint64_t b = __atomic_load_n(&p->kblock_big[k], __ATOMIC_RELAXED);
+        if (lo - (b & ~63ull) < 1ull << (b & 63)) {
+            *key = b;
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static void kblock_clear(HvPerCpu *p) {
+    if (!p || (!p->nkblock && !p->nkblock_big && !p->kblock_unknown)) return;
+    for (uint32_t i = 0; i < HV_KBLOCK_SLOTS; i++) __atomic_store_n(&p->kblock[i], 0, __ATOMIC_RELAXED);
+    __atomic_store_n(&p->nkblock, 0, __ATOMIC_SEQ_CST);
+    __atomic_store_n(&p->nkblock_big, 0, __ATOMIC_SEQ_CST);
+    __atomic_store_n(&p->kblock_unknown, 0, __ATOMIC_SEQ_CST);
+}
+
+void hv_tlb_drop_kernel_block(HvCpu *cpu, uint64_t va) {
+    HvPerCpu *p = cpu->pc_state;
+    uint64_t key = 0;
+    int r = p && ((va >> 55) & 1) ? kblock_find(p, va, &key) : 0;
+    if (!r) return;
+    if (r == 2) { /* every kernel entry; the records start over with it */
+        if (cpu->m) cpu->m->stats.flush_why[6]++;
+        hv_tlb_flush(cpu);
+        return;
+    }
+    uint64_t size = 1ull << (key & 63), base = (key & ~63ull) | 0xff00000000000000ull;
+    hv_tlb_flush_kernel_range(cpu, base, size);
+    /* Nothing is left of it here: forget it, so the next TLBI in those addresses costs one page again. */
+    if ((key & 63) > 21) {
+        uint32_t n = p->nkblock_big;
+        for (uint32_t k = 0; k < n; k++)
+            if (p->kblock_big[k] == key) {
+                __atomic_store_n(&p->kblock_big[k], p->kblock_big[n - 1], __ATOMIC_SEQ_CST);
+                __atomic_store_n(&p->nkblock_big, n - 1, __ATOMIC_SEQ_CST);
+                break;
+            }
+    } else {
+        __atomic_store_n(&p->kblock[kblock_slot(key & ~63ull)], 0, __ATOMIC_SEQ_CST);
+        __atomic_store_n(&p->nkblock, p->nkblock - 1, __ATOMIC_SEQ_CST);
+    }
+}
+
 /* Whether [va, va + len) overlaps a block p's TLB or stashes may hold entries from (or the list ran over). */
 static int blocks_overlap(const HvPerCpu *p, uint64_t va, uint64_t len) {
     uint32_t n = __atomic_load_n(&p->nblock_fills, __ATOMIC_SEQ_CST);
@@ -711,6 +805,9 @@ static void tlb_fill(HvCpu *cpu, uint64_t va, int el, const HvWalk *w) {
         if (cpu->nuser_fills < HV_USER_FILLS) cpu->user_fills[cpu->nuser_fills] = (uint16_t)hv_tlb_code(slot, table);
         if (cpu->nuser_fills <= HV_USER_FILLS) cpu->nuser_fills++;
     } else {
+        /* a block, not just a guest page bigger than the TLB's (those a TLBI by VA covers itself) */
+        if (w->block_size > (1ull << HV_TLB_PAGE_BITS) && w->block_size > (1ull << hv_mmu_granule_bits(cpu, va)) && cpu->pc_state)
+            note_kblock(cpu->pc_state, page_va, w->block_size);
         if (cpu->nkernel_fills < HV_KERNEL_FILLS) cpu->kernel_fills[cpu->nkernel_fills] = (uint16_t)hv_tlb_code(slot, table);
         if (cpu->nkernel_fills <= HV_KERNEL_FILLS) cpu->nkernel_fills++;
     }
@@ -802,6 +899,8 @@ static int walks_elsewhere(HvCpu *target, uint32_t s1, uint32_t s2, uint64_t va,
 int hv_tlbi_drop_remote_va(HvCpu *target, uint64_t va, int asid) {
     HvPerCpu *p = target->pc_state;
     if (blocks_overlap(p, va, 1ull << HV_TLB_PAGE_BITS)) return -1; /* a whole block's entries: the target does that */
+    uint64_t kb;
+    if (((va >> 55) & 1) && kblock_find(p, va, &kb)) return -1;
     uint32_t s1 = __atomic_load_n(&p->walk_seq, __ATOMIC_SEQ_CST);
     /* mid-walk: it may be about to fill from the old table, unless the walk is of another page (and not a switch's) */
     if ((s1 & 1) && !walks_elsewhere(target, s1, s1, va, 1)) { if (target->m->stats_interval) target->m->stats.race_kind[0]++; return 0; }
@@ -842,6 +941,10 @@ static void stash_drop_range(HvPerCpu *p, uint64_t va, uint64_t npages, int asid
 int hv_tlbi_drop_remote_range(HvCpu *target, uint64_t va, uint64_t npages, int asid) {
     HvPerCpu *p = target->pc_state;
     if (blocks_overlap(p, va, npages << HV_TLB_PAGE_BITS)) return -1;
+    uint64_t kb;
+    if ((va >> 55) & 1)
+        for (uint64_t i = 0; i < npages; i++)
+            if (kblock_find(p, va + (i << HV_TLB_PAGE_BITS), &kb)) return -1;
     uint32_t s1 = __atomic_load_n(&p->walk_seq, __ATOMIC_SEQ_CST);
     if ((s1 & 1) && !walks_elsewhere(target, s1, s1, va, npages)) { if (target->m->stats_interval) target->m->stats.race_kind[0]++; return 0; }
     uint32_t c1 = __atomic_load_n(&p->ijc_seq, __ATOMIC_SEQ_CST);
