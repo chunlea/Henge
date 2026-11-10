@@ -110,8 +110,15 @@ that the driver has host blobs mapped into. The driver places a blob at any mult
 pages and the host's pages are 16 KB, so the region is a paged RAM region of the engine (`core/machine.h`):
 each 4 KB page has its own place in this process, inside virglrenderer's mapping of the blob. Taking a blob
 out has every CPU empty its TLB before the mapping goes. The picture is a Metal texture virglrenderer hands
-over for the scanout, read into the device's display buffer at each flush (a copy by the CPU: the next thing
-to remove).
+over for the scanout. Where the texture is on an IOSurface the surface itself is what the host shows
+(`hv_gpu_virgl_surface`, the layer Linux guests' frames go to in the iOS app), with nothing copied; otherwise
+it is read into the device's display buffer at each flush. Windows flips between a few blobs and sets the
+scanout at every flip, so a blob keeps its texture from one frame to the next.
+
+The host can ask for another size (`hv_vm_display_wanted`; `resize W H` in hengevm's input file; the iOS
+session asks for the machine's width in the shape of the room it has): the device raises its display event,
+the driver asks again for the display's information and EDID, and its helper service in Windows (vgpusrv)
+changes the resolution.
 
 Installing the driver, once, in Windows: UTM's guest tools disc as the CD-ROM
 (`--cdrom utm-guest-tools-0.1.275.iso`; the iOS app downloads it in the machine's settings), then, in a
