@@ -1,0 +1,14 @@
+docs/windows-guest.md
+  h_44076b318daf9c 68-75,139-144,148-149
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "1b10aed13f0d40c7d918388892174e89448f40e9",
+  "prompts": {},
+  "humans": {
+    "h_44076b318daf9c": {
+      "author": "chunli <git@chunli.dev>"
+    }
+  }
+}
