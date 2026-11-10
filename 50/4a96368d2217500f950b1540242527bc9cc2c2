@@ -1,0 +1,29 @@
+devices/gicv3.c
+  s_be58c8822e297c::t_fa2ad0f775a8f4 137
+devices/gicv3.h
+  s_be58c8822e297c::t_c7f52eaa60df83 49-50
+devices/nvme.c
+  s_be58c8822e297c::t_815d2dc5b56223 357,434-452
+devices/nvme.h
+  s_be58c8822e297c::t_5eede263fa018f 62-63,66-68
+devices/virt.c
+  s_be58c8822e297c::t_78d99678df0d5a 40-47,71
+docs/windows-guest.md
+  s_be58c8822e297c::t_ca6cd0bb67b4fd 98-110,117-123
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "504a96368d2217500f950b1540242527bc9cc2c2",
+  "prompts": {},
+  "sessions": {
+    "s_be58c8822e297c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "460830a0-c917-44aa-9aea-92d45fd794ef",
+        "model": "unknown"
+      },
+      "human_author": "chunli <git@chunli.dev>"
+    }
+  }
+}
