@@ -131,9 +131,9 @@ static uint64_t acknowledge(HvGic *g, int c, int grp) {
         for (int n = 1; n < HV_GIC_NUM_IRQS; n++)
             if (g->acks[n] > g->acks[top]) top = n;
         if (now - g->acks_since < 2000 && g->acks[top] > g->nacks / 2)
-            fprintf(stderr, "hengevm: interrupt storm: INTID %d taken %u times in %llu ms on CPU %d (%s, line %d, latch %d)\n", top,
+            fprintf(stderr, "hengevm: interrupt storm: INTID %d taken %u times in %llu ms on CPU %d (%s, line %d, latch %d, route %llx)\n", top,
                     g->acks[top], (unsigned long long)(now - g->acks_since), c, F(g, c, edge, top) ? "edge" : "level",
-                    F(g, c, level, top), F(g, c, latch, top));
+                    F(g, c, level, top), F(g, c, latch, top), (unsigned long long)(top >= 32 ? g->route[top] : 0));
         if (now - g->acks_since < 2000 && g->acks[top] > g->nacks / 2 && g->storm) g->storm(g->storm_opaque, top);
         memset(g->acks, 0, sizeof g->acks);
         g->nacks = 0;
@@ -335,10 +335,14 @@ static uint64_t dist_read_body(void *opaque, uint64_t off, unsigned size) {
 static void dist_write_body(void *opaque, uint64_t off, uint64_t v, unsigned size) {
     HvGic *g = opaque;
     if (off >= 0x6100 && off < 0x6100 + 8 * HV_GIC_NUM_IRQS) {
-        uint64_t *r = &g->route[(off - 0x6000) / 8];
+        uint64_t *r = &g->route[(off - 0x6000) / 8], was = *r;
         if (size == 8) *r = v;
         else if (off & 4) *r = (*r & 0xffffffffull) | v << 32;
         else *r = (*r & ~0xffffffffull) | (uint32_t)v;
+        if (*r != was) {
+            if (getenv("HV_GIC_LOG")) fprintf(stderr, "hengevm: gic: INTID %d routed %llx -> %llx\n", (int)((off - 0x6000) / 8), (unsigned long long)was, (unsigned long long)*r);
+            hv_gicv3_update(g); /* a pending interrupt goes to its new CPU, and leaves the old one's line */
+        }
         return;
     }
     uint32_t a = (uint32_t)off & ~3u, mask = size_mask(off, size);
