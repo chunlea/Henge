@@ -299,7 +299,7 @@ int hv_vm_create(const HvVmConfig *c, char *err, size_t errlen) {
     if (linux_guest) {
         /* The display: the top of RAM, 2 MB aligned, left out of the guest's memory node. */
         board.fb_width = c->fb_width ? c->fb_width : 1280;
-        board.fb_height = c->fb_height ? c->fb_height : 800;
+        board.fb_height = c->fb_height ? c->fb_height : getenv("HV_FB_H") ? atoi(getenv("HV_FB_H")) : 800;
         uint64_t fb = ((uint64_t)board.fb_width * board.fb_height * 4 + (2ull << 20) - 1) & ~((2ull << 20) - 1);
         board.fb_size = fb;
         board.fb_base = VMAPPLE_MEM + board.ram_size - fb;

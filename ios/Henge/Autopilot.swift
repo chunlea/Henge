@@ -107,8 +107,8 @@ enum Autopilot {
             var px: Int32 = 0, py: Int32 = 0
             let rc = henge_vm_pointer(&px, &py)
             HengeLog.log("autopilot", "pointer \(rc == 0 ? "at \(px), \(py)" : "not known yet")")
-        case "cmd": // "cmd space", "cmd q": the key with Command held
-            if let c = arg == "space" ? " " : arg.first { Keys.chord(125, c) }
+        case "cmd": // "cmd space", "cmd return", "cmd q": the key with Command held
+            if let c = arg == "space" ? " " : arg == "return" ? "\n" : arg.first { Keys.chord(125, c) }
         case "knob":
             let kv = arg.split(separator: " ")
             if kv.count == 2, let value = Int32(kv[1]) {

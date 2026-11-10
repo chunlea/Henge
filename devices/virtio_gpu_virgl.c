@@ -257,7 +257,12 @@ static uint32_t flush(HvGpuVirgl *v, const uint8_t *req) {
     }
     struct virgl_box box = {rc.x, rc.y, 0, rc.w, rc.h, 1};
     struct iovec iov = {v->readback, px * 4};
-    if (vr.transfer_read_iov(id, 0, 0, rc.w * 4, 0, &box, 0, &iov, 1)) return RESP_ERR_UNSPEC;
+    int err = vr.transfer_read_iov(id, 0, 0, rc.w * 4, 0, &box, 0, &iov, 1);
+    static unsigned failures;
+    if (getenv("HV_GPU_LOG") || (err && failures++ < 20))
+        fprintf(stderr, "hengevm: virgl: flush res %u (%ux%u fmt %u) rect %u,%u %ux%u -> %d\n", id, r->w, r->h,
+                r->format, rc.x, rc.y, rc.w, rc.h, err);
+    if (err) return RESP_ERR_UNSPEC;
     for (uint32_t y = 0; y < rc.h; y++) {
         const uint32_t *src = v->readback + (size_t)y * rc.w;
         uint32_t *dst = g->display + (size_t)(rc.y + y) * g->width + rc.x;
