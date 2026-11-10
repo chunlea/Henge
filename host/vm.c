@@ -310,6 +310,14 @@ int hv_vm_create(const HvVmConfig *c, char *err, size_t errlen) {
     int r = c->jit_rx ? hv_machine_init_jit(&m, c->jit_rx, c->jit_rw, jit) : hv_machine_init(&m, jit);
     if (r != 0) return fail(err, errlen, "Cannot set up the JIT region.");
     m.log = c->log;
+    /* Linux: accesses through one base register in a block share a TLB lookup (HV_GROUPS), and a loop's branch back
+       tests for a request to leave before it rather than in its exit (HV_HOIST_CHECK). Measured on Python and
+       Chromium's JavaScript, by the host instructions the same guest work took: 13% and 10% fewer with both. Left
+       off for macOS, where grouping was measured no faster and makes the code about 15% bigger. */
+    if (linux_guest) {
+        if (!getenv("HV_GROUPS")) hv_knob[HV_K_GROUPS] = 1;
+        if (!getenv("HV_HOIST_CHECK")) hv_knob[HV_K_HOIST] = 1;
+    }
     m.gen_checks = getenv("HV_JIT_POISON") != NULL;
     if (getenv("HV_SLOW_MEM")) m.slow_mem = 1; /* debugging: every load and store through the helper */
     ncpus = c->ncpus < 1 ? 1 : c->ncpus > HV_MAX_CPUS ? HV_MAX_CPUS : c->ncpus;

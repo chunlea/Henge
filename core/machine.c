@@ -271,6 +271,7 @@ void hv_cpu_sync(HvCpu *self, HvCpu *target, uint64_t seq) {
             mach_msg_type_number_t cnt = THREAD_BASIC_INFO_COUNT;
             int on = !t->thread || (thread_info(t->thread, THREAD_BASIC_INFO, (thread_info_t)&ti, &cnt) == KERN_SUCCESS && ti.run_state == TH_STATE_RUNNING);
             mm->stats.sync_phase[on ? __atomic_load_n(&t->phase, __ATOMIC_RELAXED) % 5 : 5]++;
+            mm->stats.sync_pc[mm->stats.nsync_pc++ & 7] = target->pc | target->el;
         }
         if (!__atomic_load_n(&t->tlb_live, __ATOMIC_SEQ_CST)) break; /* parked: it does the work before it runs again */
         if (self) hv_cpu_process_requests(self);

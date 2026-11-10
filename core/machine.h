@@ -77,6 +77,8 @@ typedef struct HvStats {
     uint64_t syncs, sync_ticks;        /* TLBI acks waited for, and host ticks spent waiting */
     uint64_t sync_len[4], sync_len_ticks[4]; /* those waits by length: under 10 us, 100 us, 1 ms, longer */
     uint64_t sync_probe[4];            /* a wait 100 us long looks at the other CPU: thread off a core, on one, mid walk, mid cache fill */
+    uint64_t sync_pc[8];               /* where the CPUs waited on for 1 ms last entered a block (| el), the newest 8 */
+    uint32_t nsync_pc;
     uint64_t sync_phase[6];            /* a wait 1 ms long: the other CPU running (guest code or dispatcher), translating, in a helper,
                                           waiting for acks itself, at the flush barrier; or its thread off a core */
     uint64_t dev_waits, dev_wait_ticks; /* device lock taken while another CPU held it */
