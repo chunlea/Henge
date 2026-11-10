@@ -37,5 +37,7 @@ HvVirtioGpu *hv_virtio_gpu_create(HvMachine *m, HvPcie *bus, uint32_t width, uin
 void hv_virtio_gpu_compose(HvVirtioGpu *g, uint32_t *out);
 /* CPU 0, device lock held: 3D requests that have finished go back to the guest. */
 void hv_virtio_gpu_poll(HvVirtioGpu *g);
+/* With the CPUs stopped: the device, its resources and its 3D side. */
+void hv_virtio_gpu_destroy(HvVirtioGpu *g);
 
 #endif

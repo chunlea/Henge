@@ -291,3 +291,10 @@ void hv_virtio_gpu_compose(HvVirtioGpu *g, uint32_t *out) {
         }
     }
 }
+
+void hv_virtio_gpu_destroy(HvVirtioGpu *g) {
+    if (!g) return;
+    hv_gpu_virgl_stop(g->virgl);
+    while (g->res) unref(g, g->res->id);
+    free(g);
+}

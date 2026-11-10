@@ -63,6 +63,7 @@ static struct {
     int (*create_fence)(int, uint32_t);
     void (*poll)(void);
     void *(*get_cursor_data)(uint32_t, uint32_t *, uint32_t *);
+    void (*cleanup)(void *); /* optional */
 } vr;
 
 /* --- EGL (ANGLE), what is used of it --- */
@@ -111,6 +112,7 @@ struct HvGpuVirgl {
     Req *ring;
     uint32_t submitted, taken, published; /* submitted: by notify; taken: run by the worker; published: back to the guest */
     int started;                          /* 1 up, -1 failed */
+    int stop;                             /* hv_gpu_virgl_stop: the worker cleans up and ends */
     uint32_t last_fence;                  /* the last fence virglrenderer says has passed */
     EGLDisplay dpy;
     EGLConfig cfg;
@@ -174,6 +176,7 @@ static int bring_up(HvGpuVirgl *v) {
     V(resource_create) V(resource_unref) V(resource_attach_iov) V(resource_detach_iov) V(transfer_write_iov)
     V(transfer_read_iov) V(submit_cmd) V(create_fence) V(poll) V(get_cursor_data)
 #undef V
+    *(void **)&vr.cleanup = dlsym(r, "virgl_renderer_cleanup");
     v->dpy = egl.GetDisplay(NULL);
     EGLint major, minor, n = 0;
     if (!v->dpy || !egl.Initialize(v->dpy, &major, &minor)) { fprintf(stderr, "hengevm: virgl: no EGL display\n"); return -1; }
@@ -526,6 +529,10 @@ static void *worker(void *arg) {
             Req *q = &v->ring[i % RING];
             if (q->fenced && !__atomic_load_n(&q->done, __ATOMIC_ACQUIRE)) waiting = 1;
         }
+        if (v->stop) {
+            pthread_mutex_unlock(&v->mu);
+            break;
+        }
         if (v->taken == v->submitted) {
             if (waiting) {
                 struct timespec ts;
@@ -554,6 +561,17 @@ static void *worker(void *arg) {
         }
         if (finished) hv_machine_wake(v->g->m);
     }
+    /* Stopped (the machine is being released): everything this thread made, so another machine can start 3D. */
+    while (v->res) {
+        Res *r = v->res;
+        detach(v, r);
+        vr.resource_unref(r->id);
+        v->res = r->next;
+        free(r);
+    }
+    if (vr.cleanup) vr.cleanup(v);
+    egl.MakeCurrent(v->dpy, NULL, NULL, NULL);
+    if (v->main_ctx) egl.DestroyContext(v->dpy, v->main_ctx);
     return NULL;
 }
 
@@ -619,3 +637,17 @@ HvGpuVirgl *hv_gpu_virgl_start(HvVirtioGpu *g, const char *dir) {
 }
 
 void hv_gpu_virgl_attach(HvGpuVirgl *v) { v->g->vio.notify = notify; }
+
+void hv_gpu_virgl_stop(HvGpuVirgl *v) {
+    if (!v) return;
+    pthread_mutex_lock(&v->mu);
+    v->stop = 1;
+    pthread_cond_signal(&v->cv);
+    pthread_mutex_unlock(&v->mu);
+    pthread_join(v->thread, NULL);
+    pthread_mutex_destroy(&v->mu);
+    pthread_cond_destroy(&v->cv);
+    free(v->ring);
+    free(v->readback);
+    free(v);
+}

@@ -359,6 +359,7 @@ void hv_vmapple_reset_cpu(HvVmapple *b) {
 void hv_vmapple_destroy(HvVmapple *b) {
     if (b->prefault_started) pthread_join(b->prefault_thread, NULL);
     /* Device workers and GPU completions can still touch RAM and the GIC. */
+    hv_virtio_gpu_destroy(b->gpu);
     hv_virtio_blk_destroy(b->root_blk);
     hv_virtio_blk_destroy(b->aux_blk);
     hv_pvg_lite_destroy(b->pvg);

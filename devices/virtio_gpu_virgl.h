@@ -11,5 +11,7 @@ HvGpuVirgl *hv_gpu_virgl_start(HvVirtioGpu *g, const char *dir);
 void hv_gpu_virgl_attach(HvGpuVirgl *v);
 /* CPU 0, device lock held: finished requests back to the guest. */
 void hv_gpu_virgl_poll(HvGpuVirgl *v);
+/* With the CPUs stopped: ends the worker after it releases its resources, contexts and virglrenderer. */
+void hv_gpu_virgl_stop(HvGpuVirgl *v);
 
 #endif
