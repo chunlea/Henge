@@ -92,6 +92,42 @@ The firmware's file is as QEMU ships it. A Windows installed at one size keeps i
 is chosen in Settings, System, Display; the pointer is only where the finger says when Windows
 fills the framebuffer.
 
+## The GPU
+
+`hengevm --gpu DIR` (the folder of GPU frameworks, `ios/deps/virgl/macos`; the iOS app's Windows machines
+have it unless switched off) adds a virtio-gpu device for Triton, UTM's Direct3D 11 driver for Windows on
+Arm (`viogpu3d`, github.com/osy/kvm-guest-drivers-windows; signed by Microsoft's hardware program, so
+Windows loads it as it is). The driver forwards Direct3D calls over virtio in UTM's Neptune protocol;
+virglrenderer (UTM's fork, the one Linux guests' 3D already uses) carries them out with dxmt-native,
+Direct3D 11 on Metal, in its render server: a process of its own on a Mac (UTM's `QEMURenderServer`, signed
+again without its sandbox by `ios/scripts/fetch_virgl.sh`), a thread on iOS. `dwm.exe` then composes
+the desktop on the host's GPU, and Direct3D 11 programs draw with it.
+
+What the device (`devices/virtio_gpu_virgl.c`, `hv_virtio_gpu_create_d3d`) has for that, beside what Linux's
+OpenGL uses: blob resources, contexts made for a protocol, fences on a context's own timelines, an EDID, and
+a host-visible shared memory region (a 64-bit BAR in a second PCI window above RAM, `VIRT_PCIE_MMIO64`)
+that the driver has host blobs mapped into. The driver places a blob at any multiple of the guest's 4 KB
+pages and the host's pages are 16 KB, so the region is a paged RAM region of the engine (`core/machine.h`):
+each 4 KB page has its own place in this process, inside virglrenderer's mapping of the blob. Taking a blob
+out has every CPU empty its TLB before the mapping goes. The picture is a Metal texture virglrenderer hands
+over for the scanout, read into the device's display buffer at each flush (a copy by the CPU: the next thing
+to remove).
+
+Installing the driver, once, in Windows: UTM's guest tools disc as the CD-ROM
+(`--cdrom utm-guest-tools-0.1.275.iso`; the iOS app downloads it in the machine's settings), then, in a
+prompt run as administrator, `pnputil /add-driver D:\Drivers\viogpu3d\w11\ARM64\viogpu3d.inf /install`.
+The screen changes over when the driver starts. From then on the machine is started with `--gpu-only 1`
+(the app remembers): with the firmware's framebuffer still there Windows has two monitors, the
+framebuffer one nobody sees, and its taskbar and Start menu come out wrong. Without it nothing shows
+until the driver starts, about forty seconds into a start.
+
+Two things the driver needed of virtio that nothing else here did: the config interrupt's vector reads back
+what was written (it writes one with no MSI-X, and gives the device up otherwise), and a reset of the
+device lets go of every resource and context.
+
+Seen with driver v0.5 on a Mac: the desktop, Settings, Windows Terminal and the Start menu with its blur
+are drawn; the Start menu's app names are not. Not yet tried on an iPad.
+
 ## Running it
 
 ```
@@ -152,9 +188,8 @@ its Details type what Setup needs: the LabConfig settings above, and `oobe\bypas
 ## Not there yet
 
 - No sound, no clipboard or shared folder.
-- No display driver: Windows draws with the CPU, and the screen's size is fixed for a run (below).
-  A size that follows the window, and drawing by the GPU, need a driver: virtio-win's viogpudo, on
-  a virtio-gpu device, is the one to try.
+- Without the GPU's driver installed (below) Windows draws with the CPU, and the screen's size is fixed
+  for a run.
 - A restart ends `hengevm`: it has to be started again (a shell loop does). The
   firmware then starts Windows Boot Manager from the disk, whose entry Windows wrote to
   the firmware's variables.
