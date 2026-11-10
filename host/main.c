@@ -529,7 +529,7 @@ static void both_hook(HvCpu *c) {
 }
 
 /* Debugging: HV_INPUT_FILE=path follows a file of lines, for driving a running guest:
-   "click x y", "move x y", "key code" (Linux), "hidkey usage", "hiddown usage", "hidup usage", "shiftkey code", "type words", "wait seconds". */
+   "click x y", "rclick x y", "move x y", "key code" (Linux), "hidkey usage", "hiddown usage", "hidup usage", "shiftkey code", "type words", "wait seconds". */
 static void *input_thread(void *unused) {
     (void)unused;
     FILE *f = fopen(getenv("HV_INPUT_FILE"), "a+");
@@ -548,6 +548,11 @@ static void *input_thread(void *unused) {
         int x, y;
         if (sscanf(line, "click %d %d", &x, &y) == 2) pointer_to(x, y), click_here();
         else if (sscanf(line, "move %d %d", &x, &y) == 2) pointer_to(x, y);
+        else if (sscanf(line, "rclick %d %d", &x, &y) == 2) { /* the right button, as the host UI presses it */
+            pointer_to(x, y);
+            hv_vm_mouse_button(1, 1);
+            hv_vm_mouse_button(1, 0);
+        }
         else if (sscanf(line, "scroll %d %d", &x, &y) == 2) {
             if (y) hv_vm_mouse_wheel(y);
             if (x) hv_vm_mouse_hwheel(x);
