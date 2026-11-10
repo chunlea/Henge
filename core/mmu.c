@@ -332,6 +332,8 @@ void hv_tlb_flush_user(HvCpu *cpu) {
         }
 }
 
+static void drop_blocks(HvCpu *cpu, uint64_t va, uint64_t len, int asid);
+
 /* A TLBI for a big user range: only the user entries filled since the last
    flush that fall in it (all of them if there were too many to list). */
 void hv_tlb_flush_user_range(HvCpu *cpu, uint64_t va, uint64_t len) {
@@ -351,6 +353,7 @@ void hv_tlb_flush_user_range(HvCpu *cpu, uint64_t va, uint64_t len) {
         uint64_t pg = tag & 0x00ffffffffffffffull;
         if (pg < lo + len && pg + PAGE_MASK + 1 > lo) memset(e, 0x80, sizeof *e);
     }
+    drop_blocks(cpu, va, len, -1);
 }
 
 /* A big range of kernel VAs. A full flush here also dropped every process's entries and both halves of the branch
@@ -486,6 +489,65 @@ void hv_ijc_drop_va(HvCpu *cpu, uint64_t va, int asid) {
 }
 
 static void stash_drop_va(HvPerCpu *p, uint64_t va, int asid);
+static void stash_drop(HvPerCpu *p, int asid);
+
+/* A user block mapping bigger than the TLB's pages was filled from (tlb_fill): remember it, before the entry is
+   made, so a TLBI anywhere in it drops all of it (hv_tlb_drop_blocks; other CPUs read the list too). */
+static void note_block(HvPerCpu *p, uint64_t va, uint64_t size) {
+    int bits = 63 - __builtin_clzll(size);
+    uint64_t key = (va & 0x00ffffffffffffffull & ~(size - 1)) | (uint64_t)bits;
+    uint32_t n = __atomic_load_n(&p->nblock_fills, __ATOMIC_RELAXED);
+    if (n > HV_BLOCK_FILLS) return;
+    for (uint32_t k = 0; k < n; k++)
+        if (p->block_fill[k] == key) return;
+    if (n < HV_BLOCK_FILLS) __atomic_store_n(&p->block_fill[n], key, __ATOMIC_RELAXED);
+    __atomic_store_n(&p->nblock_fills, n + 1, __ATOMIC_SEQ_CST);
+}
+
+/* Whether [va, va + len) overlaps a block p's TLB or stashes may hold entries from (or the list ran over). */
+static int blocks_overlap(const HvPerCpu *p, uint64_t va, uint64_t len) {
+    uint32_t n = __atomic_load_n(&p->nblock_fills, __ATOMIC_SEQ_CST);
+    if (!n || ((va >> 55) & 1)) return 0;
+    if (n > HV_BLOCK_FILLS) return 1;
+    uint64_t lo = va & 0x00ffffffffffffffull, hi = lo + (len ? len : 1);
+    for (uint32_t k = 0; k < n; k++) {
+        uint64_t b = __atomic_load_n(&p->block_fill[k], __ATOMIC_RELAXED), base = b & ~63ull, size = 1ull << (b & 63);
+        if (base < hi && base + size > lo) return 1;
+    }
+    return 0;
+}
+
+/* A TLBI of [va, va + len) in user space, done here: a block mapping it overlaps loses every entry made from it,
+   as a hardware TLB holding the block as one entry would (Linux replaces a 2 MB zero page by a real one with one
+   TLBI by VA; entries left for the block's other pages read the zero page while writes went to the new one). */
+static void drop_blocks(HvCpu *cpu, uint64_t va, uint64_t len, int asid) {
+    HvPerCpu *p = cpu->pc_state;
+    if (!p || !blocks_overlap(p, va, len)) return;
+    uint32_t n = __atomic_load_n(&p->nblock_fills, __ATOMIC_SEQ_CST);
+    if (n > HV_BLOCK_FILLS) { /* not known which: every user entry, here and in the stashes */
+        hv_tlb_flush_user(cpu);
+        stash_drop(p, -1);
+        hv_ijc_reset(cpu, 0);
+        __atomic_store_n(&p->nblock_fills, 0, __ATOMIC_SEQ_CST);
+        return;
+    }
+    uint64_t lo = va & 0x00ffffffffffffffull, hi = lo + (len ? len : 1);
+    for (uint32_t k = 0; k < n; k++) {
+        uint64_t b = p->block_fill[k], base = b & ~63ull, size = 1ull << (b & 63);
+        if (base >= hi || base + size <= lo) continue;
+        uint64_t pages = size >> HV_TLB_PAGE_BITS;
+        if (pages > HV_TLB_SIZE) {
+            hv_tlb_flush_user(cpu);
+        } else {
+            for (uint64_t i = 0; i < pages; i++) {
+                uint32_t idx = (uint32_t)((base >> HV_TLB_PAGE_BITS) + i) & (HV_TLB_SIZE - 1);
+                for (int t = 0; t < 3; t++) memset(hv_tlb_ent(cpu, idx, t), 0x80, sizeof(HvTlbEntry));
+            }
+        }
+        stash_drop(p, asid);
+        hv_ijc_drop_range(cpu, base, size, asid);
+    }
+}
 
 void hv_tlb_flush_va_asid(HvCpu *cpu, uint64_t va, int asid) {
     /* Tagged addresses may sit in any slot's tag byte, so check by the low 56 bits. */
@@ -496,6 +558,7 @@ void hv_tlb_flush_va_asid(HvCpu *cpu, uint64_t va, int asid) {
         HvTlbEntry *e = hv_tlb_ent(cpu, idx, el);
         memset(e, 0x80, sizeof *e);
     }
+    drop_blocks(cpu, va, 1ull << HV_TLB_PAGE_BITS, asid);
 }
 
 /* One page (a TLBI by VA): as hv_tlb_flush_va_asid, but in the stashes only that page's entries go,
@@ -509,6 +572,7 @@ void hv_tlb_flush_va_page(HvCpu *cpu, uint64_t va, int asid) {
         HvTlbEntry *e = hv_tlb_ent(cpu, idx, el);
         memset(e, 0x80, sizeof *e);
     }
+    drop_blocks(cpu, va, 1ull << HV_TLB_PAGE_BITS, asid);
 }
 
 /* A TLBI by range too big to do page by page in the TLB (which then drops its
@@ -643,6 +707,7 @@ static void tlb_fill(HvCpu *cpu, uint64_t va, int el, const HvWalk *w) {
     uint32_t slot = (uint32_t)(va >> HV_TLB_PAGE_BITS) & (HV_TLB_SIZE - 1);
     HvTlbEntry *e = hv_tlb_ent(cpu, slot, table);
     if (!((page_va >> 55) & 1)) {
+        if (w->block_size > (1ull << HV_TLB_PAGE_BITS) && cpu->pc_state) note_block(cpu->pc_state, page_va, w->block_size);
         if (cpu->nuser_fills < HV_USER_FILLS) cpu->user_fills[cpu->nuser_fills] = (uint16_t)hv_tlb_code(slot, table);
         if (cpu->nuser_fills <= HV_USER_FILLS) cpu->nuser_fills++;
     } else {
@@ -736,6 +801,7 @@ static int walks_elsewhere(HvCpu *target, uint32_t s1, uint32_t s2, uint64_t va,
 
 int hv_tlbi_drop_remote_va(HvCpu *target, uint64_t va, int asid) {
     HvPerCpu *p = target->pc_state;
+    if (blocks_overlap(p, va, 1ull << HV_TLB_PAGE_BITS)) return -1; /* a whole block's entries: the target does that */
     uint32_t s1 = __atomic_load_n(&p->walk_seq, __ATOMIC_SEQ_CST);
     /* mid-walk: it may be about to fill from the old table, unless the walk is of another page (and not a switch's) */
     if ((s1 & 1) && !walks_elsewhere(target, s1, s1, va, 1)) { if (target->m->stats_interval) target->m->stats.race_kind[0]++; return 0; }
@@ -775,6 +841,7 @@ static void stash_drop_range(HvPerCpu *p, uint64_t va, uint64_t npages, int asid
 
 int hv_tlbi_drop_remote_range(HvCpu *target, uint64_t va, uint64_t npages, int asid) {
     HvPerCpu *p = target->pc_state;
+    if (blocks_overlap(p, va, npages << HV_TLB_PAGE_BITS)) return -1;
     uint32_t s1 = __atomic_load_n(&p->walk_seq, __ATOMIC_SEQ_CST);
     if ((s1 & 1) && !walks_elsewhere(target, s1, s1, va, npages)) { if (target->m->stats_interval) target->m->stats.race_kind[0]++; return 0; }
     uint32_t c1 = __atomic_load_n(&p->ijc_seq, __ATOMIC_SEQ_CST);

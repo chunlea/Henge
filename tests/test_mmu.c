@@ -165,6 +165,39 @@ int main(void) {
         failures++;
     }
 
+    /* A 2 MB block (Linux's transparent huge pages) in RAM: entries for several of its pages, then a TLBI by VA
+       for one of them, as Linux sends when it puts a real page where the huge zero page was. All must go: the
+       others read the old page while writes went to the new one, and glibc's heap broke. */
+    {
+        uint8_t *big = aligned_alloc(1u << 21, 1u << 21);
+        hv_machine_add_ram(&m, 0x90000000ull, 1u << 21, big, 0);
+        if (!cpu.pc_state) cpu.pc_state = &m.percpu[0];
+        map(r4, 12, 39, 0x40400000, 2, 0x90000000ull | BLOCK | AF, 0);
+        hv_tlb_flush(&cpu);
+        int filled = 0;
+        for (int k = 0; k < 8; k++) {
+            uint64_t va = 0x40400000ull + ((uint64_t)k << HV_TLB_PAGE_BITS) + 0x10;
+            hv_mmu_access(&cpu, va, HV_ACC_READ, 1, &pa);
+            filled += hv_tlb_ent(&cpu, (va >> HV_TLB_PAGE_BITS) & (HV_TLB_SIZE - 1), 1)->read_tag != HV_TLB_INVALID;
+        }
+        checks++;
+        if (filled != 8) {
+            printf("  FAIL 2 MB block: %d of 8 pages in the TLB\n", filled);
+            failures++;
+        }
+        cpu.el = 1;
+        cpu.x[1] = (0x40400000ull + (3ull << HV_TLB_PAGE_BITS)) >> 12; /* VA[55:12] of the block's fourth page */
+        hv_sysreg_sys(&cpu, 0xd5088321u, 0);                         /* tlbi vae1is, x1 */
+        for (int k = 0; k < 8; k++) {
+            uint64_t va = 0x40400000ull + ((uint64_t)k << HV_TLB_PAGE_BITS);
+            checks++;
+            if (hv_tlb_ent(&cpu, (va >> HV_TLB_PAGE_BITS) & (HV_TLB_SIZE - 1), 1)->read_tag != HV_TLB_INVALID) {
+                printf("  FAIL TLBI by VA in a 2 MB block kept page %d\n", k);
+                failures++;
+            }
+        }
+    }
+
     /* 64 KB granule, 42-bit TTBR0 (levels 2-3): pages and 512 MB blocks. */
     uint64_t r6 = alloc_table();
     cpu.ttbr0_el1 = r6;

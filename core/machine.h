@@ -198,6 +198,12 @@ typedef struct HvPerCpu {
     uint64_t walk_page[8];       /* the page walk k (walk_seq 2k -> 2k+1) fills, at [k % 8]; HV_WALK_ANY: a process switch */
     uint32_t ijc_seq;            /* odd while it checks a block's mapping in its TLB and caches it (hv_ijc_fill_checked) */
     HvTlbStash stash[HV_STASHES];
+    /* User block mappings bigger than the TLB's pages (Linux's 2 MB transparent huge pages) that entries were filled
+       from: one TLBI by VA drops a whole block, so every entry made from it must go too, not just that VA's
+       (hv_tlb_drop_blocks). Base VA's low 56 bits | log2 of the size; more than HV_BLOCK_FILLS: not known which. */
+#define HV_BLOCK_FILLS 32
+    uint64_t block_fill[HV_BLOCK_FILLS];
+    uint32_t nblock_fills;
     uint64_t stash_clock;
 } HvPerCpu;
 
