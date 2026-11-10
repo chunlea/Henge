@@ -1,0 +1,23 @@
+core/machine.h
+  s_5d579fcfcf203e::t_6a7303797d94e6 201-206
+core/mmu.c
+  s_5d579fcfcf203e::t_b174e9bfb69b0e 335-336,356,492-550,561,575,710,804,844
+tests/test_mmu.c
+  s_5d579fcfcf203e::t_396756efc98a8f 168-200
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "91768212fc2c99fdc87a78bd688f37a44365d5de",
+  "prompts": {},
+  "sessions": {
+    "s_5d579fcfcf203e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "727becf5-5273-4b49-834b-c569b966f9b1",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "chunli <git@chunli.dev>"
+    }
+  }
+}
