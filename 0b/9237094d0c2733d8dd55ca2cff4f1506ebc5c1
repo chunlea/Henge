@@ -1,0 +1,21 @@
+docs/architecture.md
+  s_b150d4baf3361d::t_783ddb79b99f41 9-10,17
+docs/windows-guest.md
+  s_b150d4baf3361d::t_580e188172f7f2 1-104
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "0b9237094d0c2733d8dd55ca2cff4f1506ebc5c1",
+  "prompts": {},
+  "sessions": {
+    "s_b150d4baf3361d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "915238ae-3e2a-4ab7-84e8-ec4855476532",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "chunli <git@chunli.dev>"
+    }
+  }
+}
