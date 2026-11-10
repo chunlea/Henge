@@ -3,6 +3,7 @@
 
 #include <pthread.h>
 
+#include "disk.h"
 #include "pcie.h"
 
 /* An xHCI USB host controller (xHCI 1.0, one interrupter, 32-byte contexts,
@@ -13,8 +14,15 @@
    any thread (hv_xhci_key, hv_xhci_touch); the CPU thread delivers them
    (hv_xhci_poll). */
 #define HV_XHCI_SLOTS 8
-#define HV_XHCI_PORTS 2
+#define HV_XHCI_PORTS 2      /* the virtual Mac's */
+#define HV_XHCI_MAX_PORTS 4
 #define HV_XHCI_DEVICES 2
+/* What can sit on a port. The virtual Mac has the first two. The UEFI board (hv_xhci_create_pc) has a
+   keyboard, a tablet (a pointer that reports where it is on the screen, as QEMU's usb-tablet does: no
+   mouse to capture) and, with installation media, a USB CD-ROM drive (mass storage, bulk-only, SCSI):
+   devices Windows has drivers for out of the box. */
+enum { HV_USB_KEYBOARD, HV_USB_TRACKPAD, HV_USB_TABLET, HV_USB_CDROM };
+#define HV_TAB_REPORTS 64
 #define HV_XHCI_INTRS 4
 #define HV_XHCI_EPS 32 /* device context index 1..31 */
 #define HV_XHCI_REPORTS 256
@@ -40,7 +48,10 @@ typedef struct HvXhci {
     uint64_t dcbaap;
     HvXhciRing cmd;
     int cmd_running;
-    uint32_t portsc[HV_XHCI_PORTS];
+    uint32_t portsc[HV_XHCI_MAX_PORTS];
+    int nports;
+    int kind[HV_XHCI_MAX_PORTS]; /* HV_USB_*: the device on each port */
+    int pc;                      /* the UEFI board's set of devices */
     /* interrupters and their event rings (macOS's driver wants at least three) */
     struct HvXhciIntr {
         uint32_t iman, imod, erstsz;
@@ -56,6 +67,10 @@ typedef struct HvXhci {
         int configured;
         HvXhciRing ep[HV_XHCI_EPS];
         int ep_running[HV_XHCI_EPS];
+        /* pc: the control transfer in progress */
+        uint8_t setup[8];
+        uint8_t reply[256];
+        int reply_len;   /* -1: the request is refused (a stall at its next stage) */
     } slots[HV_XHCI_SLOTS + 1];
     /* keyboard reports waiting for an IN transfer (8 bytes each) */
     pthread_mutex_t mu;
@@ -83,9 +98,29 @@ typedef struct HvXhci {
     uint32_t tp_multi_logs; /* multi-finger deliveries logged, capped */
     uint8_t tp_f1[8];   /* feature report 1: the header for the selected sensor register */
     int tp_f1_len;
+    /* The tablet: reports waiting for an IN transfer (buttons, x, y, wheel: 6 bytes each), under mu. */
+    uint8_t tab_reports[HV_TAB_REPORTS][6];
+    uint32_t tab_rhead, tab_rtail;
+    uint8_t tab_state[6];
+    /* The CD-ROM drive: one command at a time, as bulk-only transport has it. */
+    HvDisk *cd;
+    int msc_state;         /* waiting for a command, sending data, taking data, or owing the status */
+    uint32_t msc_tag;
+    uint32_t msc_expected; /* bytes the host said the command would move */
+    uint32_t msc_moved;
+    uint8_t msc_failed;
+    uint8_t sense_key, sense_asc;
+    uint8_t *msc_buf;      /* the data on its way to the host */
+    uint64_t msc_cap;
+    uint64_t msc_len, msc_off;
 } HvXhci;
 
 HvXhci *hv_xhci_create(HvMachine *m, HvPcie *bus);
+/* The UEFI board's: a keyboard, a tablet and, if cdrom is not NULL, a CD-ROM drive holding it. */
+HvXhci *hv_xhci_create_pc(HvMachine *m, HvPcie *bus, HvDisk *cdrom);
+/* Any thread: where the tablet's pointer is (0..32767 across the display, each way) and which buttons
+   are down (bit 0 left, 1 right, 2 middle); wheel is a number of notches turned since the last call. */
+void hv_xhci_pointer(HvXhci *x, int px, int py, int buttons, int wheel);
 /* Any thread: a key went down or up (HID usage page 7 usage, e.g. 4 = A; 0xe0-0xe7 are modifiers). */
 void hv_xhci_key(HvXhci *x, uint8_t usage, int down);
 /* The same, by Linux input key code (what the host UI produces). */

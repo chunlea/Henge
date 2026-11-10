@@ -126,16 +126,65 @@ static const uint8_t tp_config_desc[34] = {
 
 static const char *const tp_strings[] = {NULL, "Apple Inc.", "Magic Trackpad 2", "HengeVM"};
 
+/* The UEFI board's pointer: a tablet, QEMU's usb-tablet report for report (three buttons, X and Y as
+   0..32767 across the display, a wheel), which Windows and Linux take as an absolute pointer. */
+
+static const uint8_t tab_report_desc[] = {
+    0x05, 0x01, 0x09, 0x02, 0xa1, 0x01, 0x09, 0x01, 0xa1, 0x00,
+    0x05, 0x09, 0x19, 0x01, 0x29, 0x03, 0x15, 0x00, 0x25, 0x01, 0x95, 0x03, 0x75, 0x01, 0x81, 0x02, /* buttons 1-3 */
+    0x95, 0x01, 0x75, 0x05, 0x81, 0x01,
+    0x05, 0x01, 0x09, 0x30, 0x09, 0x31, 0x15, 0x00, 0x26, 0xff, 0x7f, 0x35, 0x00, 0x46, 0xff, 0x7f, /* X, Y: 0..32767 */
+    0x75, 0x10, 0x95, 0x02, 0x81, 0x02,
+    0x05, 0x01, 0x09, 0x38, 0x15, 0x81, 0x25, 0x7f, 0x35, 0x00, 0x45, 0x00, 0x75, 0x08, 0x95, 0x01, 0x81, 0x06, /* wheel */
+    0xc0, 0xc0,
+};
+
+static const uint8_t tab_device_desc[18] = {
+    18, 1, 0x00, 0x02, 0, 0, 0, 64,
+    0x27, 0x06, 0x01, 0x00,         /* QEMU's tablet: vendor 0x0627, product 1 */
+    0x00, 0x01, 1, 2, 3, 1,
+};
+
+static const uint8_t tab_config_desc[34] = {
+    9, 2, 34, 0, 1, 1, 0, 0xa0, 50,
+    9, 4, 0, 0, 1, 3, 0, 0, 0,                /* interface 0: HID, no boot protocol */
+    9, 0x21, 0x11, 0x01, 0, 1, 0x22, sizeof tab_report_desc, 0,
+    7, 5, 0x81, 3, 8, 0, 10,                  /* EP1 IN, interrupt, 8 bytes, every 10 ms */
+};
+
+static const char *const tab_strings[] = {NULL, "HengeVM", "HengeVM USB Tablet", "1"};
+
+/* The CD-ROM drive: USB mass storage, SCSI commands over the bulk-only transport. */
+
+static const uint8_t cd_device_desc[18] = {
+    18, 1, 0x00, 0x02, 0, 0, 0, 64,
+    0xf4, 0x46, 0x01, 0x00,         /* QEMU's storage device: vendor 0x46f4, product 1 */
+    0x00, 0x01, 1, 2, 3, 1,
+};
+
+static const uint8_t cd_config_desc[32] = {
+    9, 2, 32, 0, 1, 1, 0, 0x80, 50,
+    9, 4, 0, 0, 2, 8, 6, 0x50, 0,             /* interface 0: mass storage, SCSI, bulk-only */
+    7, 5, 0x81, 2, 0x00, 0x02, 0,             /* EP1 IN, bulk, 512 bytes */
+    7, 5, 0x02, 2, 0x00, 0x02, 0,             /* EP2 OUT, bulk, 512 bytes */
+};
+
+static const char *const cd_strings[] = {NULL, "HengeVM", "HengeVM USB CD-ROM", "1"};
+
 struct HvXhciDev {
     const char *const *strings;
     const uint8_t *device_desc;
     const uint8_t *config_desc;
+    unsigned config_desc_len;
     const uint8_t *report_desc;
     unsigned report_desc_len;
 };
-static const struct HvXhciDev devs[HV_XHCI_DEVICES] = {
-    {kbd_strings, kbd_device_desc, kbd_config_desc, kbd_report_desc, sizeof kbd_report_desc},
-    {tp_strings, tp_device_desc, tp_config_desc, tp_report_desc, sizeof tp_report_desc},
+/* By HV_USB_* kind. */
+static const struct HvXhciDev devs[] = {
+    {kbd_strings, kbd_device_desc, kbd_config_desc, sizeof kbd_config_desc, kbd_report_desc, sizeof kbd_report_desc},
+    {tp_strings, tp_device_desc, tp_config_desc, sizeof tp_config_desc, tp_report_desc, sizeof tp_report_desc},
+    {tab_strings, tab_device_desc, tab_config_desc, sizeof tab_config_desc, tab_report_desc, sizeof tab_report_desc},
+    {cd_strings, cd_device_desc, cd_config_desc, sizeof cd_config_desc, NULL, 0},
 };
 
 static int xlog(void) {
@@ -319,14 +368,15 @@ static void tp_select(HvXhci *x, int reg) {
 /* Answer a SETUP on endpoint 0. Returns the reply length (data to send for IN
    requests), or -1 to stall. */
 static int control(HvXhci *x, int slot, const uint8_t setup[8], uint8_t *out, int max) {
-    const struct HvXhciDev *d = &devs[x->slots[slot].dev];
+    int kind = x->kind[x->slots[slot].dev];
+    const struct HvXhciDev *d = &devs[kind];
     uint8_t type = setup[0], req = setup[1];
     uint16_t value = (uint16_t)(setup[2] | setup[3] << 8);
     if (xlog()) fprintf(stderr, "xhci: request %02x %02x value %04x len %u\n", type, req, value, setup[6] | setup[7] << 8);
     /* Every request the trackpad gets goes to the log, unconditionally: the guest's
        driver handshake is exactly what we are trying to watch. Capped so a polling
        driver cannot flood it. */
-    if (x->slots[slot].dev == 1 && x->tp_reqs < 80) {
+    if (kind == HV_USB_TRACKPAD && x->tp_reqs < 80) {
         x->tp_reqs++;
         fprintf(stderr, "hengevm: xhci: tp request %02x %02x value %04x index %04x len %u\n",
                 type, req, value, setup[4] | setup[5] << 8, setup[6] | setup[7] << 8);
@@ -337,7 +387,7 @@ static int control(HvXhci *x, int slot, const uint8_t setup[8], uint8_t *out, in
     if (type == 0x80 && req == 6) { /* GET_DESCRIPTOR (device) */
         uint8_t dt = value >> 8, idx = value & 0xff;
         if (dt == 1) src = d->device_desc, len = 18;
-        else if (dt == 2) src = d->config_desc, len = 34;
+        else if (dt == 2) src = d->config_desc, len = (int)d->config_desc_len;
         else if (dt == 3) {
             if (idx == 0) {
                 tmp[0] = 4, tmp[1] = 3, tmp[2] = 0x09, tmp[3] = 0x04; /* English (US) */
@@ -353,9 +403,13 @@ static int control(HvXhci *x, int slot, const uint8_t setup[8], uint8_t *out, in
         } else
             return -1; /* no device qualifier: full speed only */
     } else if (type == 0x81 && req == 6) { /* GET_DESCRIPTOR (interface): HID, report */
+        if (!d->report_desc) return -1;
         if ((value >> 8) == 0x22) src = d->report_desc, len = (int)d->report_desc_len;
         else if ((value >> 8) == 0x21) src = d->config_desc + 18, len = 9;
         else return -1;
+    } else if (type == 0xa1 && req == 0xfe && kind == HV_USB_CDROM) { /* GET_MAX_LUN: one unit */
+        tmp[0] = 0;
+        src = tmp, len = 1;
     } else if (type == 0x80 && req == 0) { /* GET_STATUS */
         tmp[0] = 0, tmp[1] = 0;
         src = tmp, len = 2;
@@ -372,7 +426,9 @@ static int control(HvXhci *x, int slot, const uint8_t setup[8], uint8_t *out, in
         tmp[0] = 0;
         src = tmp, len = 1;
     } else if (type == 0xa1 && req == 1) { /* GET_REPORT: wValue is (type << 8) | report ID */
-        if (x->slots[slot].dev == 0) src = x->state, len = 8;
+        if (kind == HV_USB_KEYBOARD) src = x->state, len = 8;
+        else if (kind == HV_USB_TABLET) src = x->tab_state, len = 6;
+        else if (kind != HV_USB_TRACKPAD) return -1;
         else {
             int rtype = value >> 8, rid = value & 0xff;
             if (rtype == 3) { /* feature: the sensor-configuration registers */
@@ -409,7 +465,7 @@ static int control(HvXhci *x, int slot, const uint8_t setup[8], uint8_t *out, in
         src = tmp, len = 1;
     } else if ((type & 0x60) == 0x20 || (type == 0x00 && (req == 1 || req == 3)) || (type == 0x01 && req == 11) ||
                (type == 0x02 && (req == 1 || req == 3)) ||
-               ((type & 0x60) == 0x40 && x->slots[slot].dev == 1)) {
+               ((type & 0x60) == 0x40 && kind == HV_USB_TRACKPAD)) {
         /* SET_IDLE, SET_PROTOCOL, SET_REPORT (the trackpad's multitouch switch and friends): accepted.
            Vendor requests to the trackpad too: stalling one may be what stops the guest's
            driver handshake cold, and we cannot tell what it wants yet. */
@@ -539,6 +595,357 @@ static void run_ep_in(HvXhci *x, int slot) {
     pthread_mutex_unlock(&x->mu);
 }
 
+/* ---- the UEFI board's devices: transfers a transfer descriptor at a time ----
+
+   Windows' driver ends every transfer with an Event Data TRB and takes its results from that
+   TRB's event (the bytes moved so far, not what is left), and both it and EDK2's spread one
+   transfer's buffer over several chained TRBs. So these devices deal in whole TDs: the TRBs up
+   to the first without the chain bit. */
+
+#define TD_MAX_TRBS 1024
+
+typedef struct Td {
+    int n;
+    uint64_t at[TD_MAX_TRBS];
+    uint32_t trb[TD_MAX_TRBS][4];
+    uint64_t total;     /* bytes its data TRBs carry */
+    HvXhciRing end;     /* the ring after it */
+} Td;
+
+static int td_has_data(const uint32_t *trb) {
+    int type = (trb[3] >> 10) & 0x3f;
+    return type == TRB_NORMAL || type == TRB_DATA;
+}
+
+/* The next TD on a ring, left on it. 0: none there yet (or not all of it). */
+static int td_peek(HvXhci *x, HvXhciRing *r, Td *td) {
+    HvXhciRing c = *r;
+    td->n = 0, td->total = 0;
+    for (;;) {
+        if (td->n == TD_MAX_TRBS || !ring_peek(x, &c, td->trb[td->n], &td->at[td->n])) return 0;
+        const uint32_t *trb = td->trb[td->n++];
+        if (td_has_data(trb)) td->total += trb[2] & 0x1ffff;
+        ring_advance(&c);
+        if (!(trb[3] & 0x10)) break; /* the chain ends here */
+    }
+    td->end = c;
+    return 1;
+}
+
+/* A TD's buffers, in order: up to len bytes from buf into them, or out of them into buf. */
+static void td_copy(HvXhci *x, Td *td, uint8_t *buf, uint64_t len, int to_guest) {
+    for (int i = 0; i < td->n && len; i++) {
+        uint32_t *trb = td->trb[i];
+        if (!td_has_data(trb)) continue;
+        uint64_t n = trb[2] & 0x1ffff;
+        if (n > len) n = len;
+        if (trb[3] & 0x40) { /* immediate data: the eight bytes of the TRB's own parameter */
+            if (!to_guest) memcpy(buf, trb, n < 8 ? n : 8);
+        } else {
+            uint64_t pa = (uint64_t)trb[1] << 32 | trb[0];
+            if (to_guest) wr(x, pa, buf, (unsigned)n);
+            else rd(x, pa, buf, (unsigned)n);
+        }
+        buf += n, len -= n;
+    }
+}
+
+/* A TD is done, having moved `done` bytes: the events its TRBs ask for, and on along the ring.
+   A TRB that got less than its length ends the transfer there (a short packet): the data TRBs
+   after it are passed over, and an Event Data TRB still reports. */
+static void td_complete(HvXhci *x, int slot, int dci, HvXhciRing *r, Td *td, uint64_t done) {
+    uint64_t left = done;
+    uint32_t moved = 0; /* since the last Event Data TRB */
+    int cc = CC_SUCCESS;
+    for (int i = 0; i < td->n; i++) {
+        const uint32_t *trb = td->trb[i];
+        int type = (trb[3] >> 10) & 0x3f, ioc = (trb[3] >> 5) & 1, isp = (trb[3] >> 2) & 1;
+        if (type == TRB_EVENT_DATA) {
+            if (ioc)
+                event_to(x, (int)(trb[2] >> 22), (uint64_t)trb[1] << 32 | trb[0], (uint32_t)cc << 24 | (moved & 0xffffff),
+                         TRB_TRANSFER_EVENT << 10 | 1u << 2 | (uint32_t)dci << 16 | (uint32_t)slot << 24);
+            moved = 0;
+            continue;
+        }
+        if (cc != CC_SUCCESS) continue;
+        uint32_t want = td_has_data(trb) ? trb[2] & 0x1ffff : 0;
+        uint32_t n = left < want ? (uint32_t)left : want;
+        left -= n, moved += n;
+        if (n < want) {
+            cc = CC_SHORT_PACKET;
+            if (ioc || isp) transfer_event(x, td->at[i], cc, want - n, slot, dci);
+        } else if (ioc) transfer_event(x, td->at[i], cc, 0, slot, dci);
+    }
+    *r = td->end;
+}
+
+static Td pc_td; /* device work is one thread's at a time (the device lock) */
+
+/* Endpoint 0: a setup TD, a data TD if the request has data, a status TD. A request the device
+   refuses stalls at the stage after its setup, as a device's would. */
+static void pc_ep0(HvXhci *x, int slot) {
+    struct HvXhciSlot *s = &x->slots[slot];
+    HvXhciRing *r = &s->ep[1];
+    Td *td = &pc_td;
+    while (s->ep_running[1] && td_peek(x, r, td)) {
+        int type = (td->trb[0][3] >> 10) & 0x3f;
+        if (type == TRB_SETUP) {
+            memcpy(s->setup, td->trb[0], 8);
+            uint16_t wlen = (uint16_t)(s->setup[6] | s->setup[7] << 8);
+            s->reply_len = control(x, slot, s->setup, s->reply, wlen < sizeof s->reply ? wlen : (int)sizeof s->reply);
+            td_complete(x, slot, 1, r, td, 0);
+            continue;
+        }
+        if ((type == TRB_DATA || type == TRB_STATUS) && s->reply_len < 0) {
+            s->reply_len = 0;
+            transfer_event(x, td->at[0], CC_STALL, 0, slot, 1);
+            set_ep_state(x, slot, 1, 2); /* halted, until the driver resets it and moves the dequeue pointer on */
+            s->ep_running[1] = 0;
+            return;
+        }
+        uint64_t done = 0;
+        if (type == TRB_DATA) {
+            if ((td->trb[0][3] >> 16) & 1) { /* IN: the reply */
+                done = (uint64_t)s->reply_len < td->total ? (uint64_t)s->reply_len : td->total;
+                td_copy(x, td, s->reply, done, 1);
+            } else done = td->total;       /* OUT (a keyboard's LEDs): taken and ignored */
+        }
+        td_complete(x, slot, 1, r, td, done);
+    }
+}
+
+/* The keyboard's and the tablet's interrupt endpoint (EP1 IN): a waiting report for each TD posted. */
+static void pc_hid_in(HvXhci *x, int slot) {
+    struct HvXhciSlot *s = &x->slots[slot];
+    enum { DCI = 3 };
+    if (!s->ep_running[DCI]) return;
+    int tablet = x->kind[s->dev] == HV_USB_TABLET;
+    Td *td = &pc_td;
+    pthread_mutex_lock(&x->mu);
+    for (;;) {
+        uint8_t *rep;
+        uint64_t len;
+        if (tablet) {
+            if (x->tab_rhead == x->tab_rtail) break;
+            rep = x->tab_reports[x->tab_rhead % HV_TAB_REPORTS], len = 6;
+        } else {
+            if (x->rhead == x->rtail) break;
+            rep = x->reports[x->rhead % HV_XHCI_REPORTS], len = 8;
+        }
+        if (!td_peek(x, &s->ep[DCI], td)) break;
+        if (len > td->total) len = td->total;
+        td_copy(x, td, rep, len, 1);
+        td_complete(x, slot, DCI, &s->ep[DCI], td, len);
+        if (tablet) x->tab_rhead++;
+        else x->rhead++, x->delivered++;
+    }
+    pthread_mutex_unlock(&x->mu);
+}
+
+/* ---- the CD-ROM drive ---- */
+
+enum { MSC_COMMAND, MSC_DATA_IN, MSC_DATA_OUT, MSC_STATUS };
+#define CD_BLOCK 2048u
+
+static uint32_t be32(const uint8_t *p) { return (uint32_t)p[0] << 24 | p[1] << 16 | p[2] << 8 | p[3]; }
+static void put_be32(uint8_t *p, uint32_t v) { p[0] = (uint8_t)(v >> 24), p[1] = (uint8_t)(v >> 16), p[2] = (uint8_t)(v >> 8), p[3] = (uint8_t)v; }
+static void put_be16(uint8_t *p, uint16_t v) { p[0] = (uint8_t)(v >> 8), p[1] = (uint8_t)v; }
+
+static void cd_fail(HvXhci *x, uint8_t key, uint8_t asc) {
+    x->msc_failed = 1;
+    x->sense_key = key, x->sense_asc = asc;
+    x->msc_len = 0;
+}
+
+/* `len` zeroed bytes for a command's answer. NULL (and the command failed) if there is no memory for it. */
+static uint8_t *cd_reply(HvXhci *x, uint64_t len) {
+    if (len > x->msc_cap) {
+        uint8_t *nb = len <= (64u << 20) ? realloc(x->msc_buf, len) : NULL;
+        if (!nb) {
+            cd_fail(x, 5, 0x24);
+            return NULL;
+        }
+        x->msc_buf = nb, x->msc_cap = len;
+    }
+    memset(x->msc_buf, 0, len);
+    x->msc_len = len;
+    return x->msc_buf;
+}
+
+static void cd_read(HvXhci *x, uint64_t lba, uint64_t count) {
+    uint64_t blocks = x->cd->size / CD_BLOCK, len = count * CD_BLOCK;
+    if (lba > blocks || count > blocks - lba) {
+        cd_fail(x, 5, 0x21); /* logical block address out of range */
+        return;
+    }
+    if (len > x->msc_expected) len = x->msc_expected; /* no more than the host will take */
+    uint8_t *d = cd_reply(x, len);
+    if (d && len && hv_disk_read(x->cd, lba * CD_BLOCK, d, len) != 0) cd_fail(x, 3, 0x11); /* unrecovered read error */
+}
+
+/* A SCSI command for the drive (MMC, as far as a disc that is only read needs it). */
+static void cd_command(HvXhci *x, const uint8_t *cb) {
+    uint32_t blocks = (uint32_t)(x->cd->size / CD_BLOCK);
+    uint8_t *d;
+    x->msc_failed = 0;
+    x->msc_len = x->msc_off = 0;
+    if (cb[0] != 0x03) x->sense_key = x->sense_asc = 0;
+    switch (cb[0]) {
+    case 0x00: case 0x1b: case 0x1e: case 0x35: break; /* test unit ready, start/stop, prevent removal, synchronize cache */
+    case 0x03: /* request sense */
+        if (!(d = cd_reply(x, 18))) break;
+        d[0] = 0x70, d[2] = x->sense_key, d[7] = 10, d[12] = x->sense_asc;
+        x->sense_key = x->sense_asc = 0;
+        break;
+    case 0x12: /* inquiry */
+        if (cb[1] & 1) { /* no vital product data pages */
+            cd_fail(x, 5, 0x24);
+            break;
+        }
+        if (!(d = cd_reply(x, 36))) break;
+        d[0] = 0x05, d[1] = 0x80, d[2] = 0x05, d[3] = 0x02, d[4] = 31; /* a CD-ROM drive, removable medium, SPC-3 */
+        memcpy(d + 8, "HENGE   ", 8), memcpy(d + 16, "CD-ROM          ", 16), memcpy(d + 32, "1.0 ", 4);
+        break;
+    case 0x1a: /* mode sense (6): no pages, write-protected */
+        if (!(d = cd_reply(x, 4))) break;
+        d[0] = 3, d[2] = 0x80;
+        break;
+    case 0x5a: /* mode sense (10) */
+        if (!(d = cd_reply(x, 8))) break;
+        d[1] = 6, d[3] = 0x80;
+        break;
+    case 0x23: /* read format capacities */
+        if (!(d = cd_reply(x, 12))) break;
+        d[3] = 8;
+        put_be32(d + 4, blocks);
+        d[8] = 2, d[10] = CD_BLOCK >> 8; /* formatted medium, 2048-byte blocks */
+        break;
+    case 0x25: /* read capacity: the last block and the block size */
+        if (!(d = cd_reply(x, 8))) break;
+        put_be32(d, blocks ? blocks - 1 : 0);
+        put_be32(d + 4, CD_BLOCK);
+        break;
+    case 0x28: cd_read(x, be32(cb + 2), (uint32_t)(cb[7] << 8 | cb[8])); break;
+    case 0xa8: cd_read(x, be32(cb + 2), be32(cb + 6)); break;
+    case 0x43: { /* read TOC: one session, one data track from block 0, then the lead-out */
+        int format = cb[2] & 0xf ? cb[2] & 0xf : cb[9] >> 6, msf = cb[1] & 2;
+        if (format == 1) {
+            if (!(d = cd_reply(x, 12))) break;
+            d[1] = 10, d[2] = d[3] = 1, d[5] = 0x14, d[6] = 1;
+            break;
+        }
+        if (format != 0) {
+            cd_fail(x, 5, 0x24);
+            break;
+        }
+        if (!(d = cd_reply(x, 20))) break;
+        d[1] = 18, d[2] = d[3] = 1;
+        d[5] = 0x14, d[6] = 1;
+        d[13] = 0x16, d[14] = 0xaa;
+        if (msf) { /* minutes, seconds, frames: 75 frames a second, two seconds in */
+            uint32_t f = blocks + 150;
+            d[10] = 2;
+            d[17] = (uint8_t)(f / 75 / 60), d[18] = (uint8_t)(f / 75 % 60), d[19] = (uint8_t)(f % 75);
+        } else put_be32(d + 16, blocks);
+        break;
+    }
+    case 0x46: /* get configuration: a DVD-ROM drive with a disc in it */
+        if (!(d = cd_reply(x, 40))) break;
+        put_be32(d, 36);
+        put_be16(d + 6, 0x0010);
+        d[10] = 0x03, d[11] = 8;                 /* feature 0, the profile list: DVD-ROM (current), CD-ROM */
+        put_be16(d + 12, 0x0010), d[14] = 1;
+        put_be16(d + 16, 0x0008);
+        put_be16(d + 20, 0x0001), d[22] = 0x0b, d[23] = 8; /* feature 1, core: the physical interface is USB */
+        put_be32(d + 24, 8), d[28] = 1;
+        put_be16(d + 32, 0x0003), d[34] = 0x03, d[35] = 4; /* feature 3, removable medium: a tray, no lock */
+        d[36] = 0x20;
+        break;
+    case 0x4a: /* get event status notification, polled: no news, a disc is in */
+        if (!(cb[1] & 1)) {
+            cd_fail(x, 5, 0x24);
+            break;
+        }
+        if (!(d = cd_reply(x, 8))) break;
+        d[3] = 0x10; /* the media class is the one supported */
+        if (cb[4] & 0x10) d[1] = 4, d[2] = 4, d[5] = 0x02;
+        else d[2] = 0x80; /* no event of the classes asked for */
+        break;
+    case 0x51: /* read disc information: complete, one session, one track */
+        if (!(d = cd_reply(x, 34))) break;
+        d[1] = 32, d[2] = 0x0e, d[3] = 1, d[4] = 1, d[5] = 1, d[6] = 1, d[7] = 0x20;
+        break;
+    case 0xa0: /* report LUNs: unit 0 */
+        if (!(d = cd_reply(x, 16))) break;
+        d[3] = 8;
+        break;
+    case 0xbd: cd_reply(x, 8); break; /* mechanism status: idle */
+    case 0x2a: case 0xaa: case 0x2e: cd_fail(x, 7, 0x27); break; /* writes: write-protected */
+    default:
+        if (xlog()) fprintf(stderr, "xhci: cd: command %02x not known\n", cb[0]);
+        cd_fail(x, 5, 0x20); /* invalid command */
+        break;
+    }
+    if (xlog()) fprintf(stderr, "xhci: cd: command %02x (%02x %02x %02x %02x %02x) expects %u: %s, %llu bytes\n", cb[0], cb[1], cb[2], cb[3],
+                        cb[4], cb[5], x->msc_expected, x->msc_failed ? "failed" : "ok", (unsigned long long)x->msc_len);
+    if (x->msc_len > x->msc_expected) x->msc_len = x->msc_expected;
+}
+
+/* Bulk-only transport: a 31-byte command block on the OUT endpoint, the data either way, then a
+   13-byte status block on the IN endpoint. The host may post the TD for a stage before the stage
+   is reached: it stays on its ring until then. */
+static void pc_cd(HvXhci *x, int slot) {
+    struct HvXhciSlot *s = &x->slots[slot];
+    enum { DCI_IN = 3, DCI_OUT = 4 };
+    Td *td = &pc_td;
+    for (;;) {
+        if (x->msc_state == MSC_COMMAND) {
+            if (!s->ep_running[DCI_OUT] || !td_peek(x, &s->ep[DCI_OUT], td)) return;
+            uint8_t cbw[31] = {0};
+            td_copy(x, td, cbw, td->total < sizeof cbw ? td->total : sizeof cbw, 0);
+            td_complete(x, slot, DCI_OUT, &s->ep[DCI_OUT], td, td->total);
+            if (td->total != sizeof cbw || memcmp(cbw, "USBC", 4)) continue; /* not a command block */
+            memcpy(&x->msc_tag, cbw + 4, 4);
+            memcpy(&x->msc_expected, cbw + 8, 4);
+            x->msc_moved = 0;
+            cd_command(x, cbw + 15);
+            x->msc_state = !x->msc_expected ? MSC_STATUS : cbw[12] & 0x80 ? MSC_DATA_IN : MSC_DATA_OUT;
+        } else if (x->msc_state == MSC_DATA_IN) {
+            if (!s->ep_running[DCI_IN] || !td_peek(x, &s->ep[DCI_IN], td)) return;
+            uint64_t n = x->msc_len - x->msc_off;
+            if (n > td->total) n = td->total;
+            td_copy(x, td, x->msc_buf + x->msc_off, n, 1);
+            td_complete(x, slot, DCI_IN, &s->ep[DCI_IN], td, n); /* short, even empty, when there is no more */
+            x->msc_off += n, x->msc_moved += (uint32_t)n;
+            if (x->msc_off == x->msc_len) x->msc_state = MSC_STATUS;
+        } else if (x->msc_state == MSC_DATA_OUT) { /* nothing here takes data: it is swallowed */
+            if (!s->ep_running[DCI_OUT] || !td_peek(x, &s->ep[DCI_OUT], td)) return;
+            td_complete(x, slot, DCI_OUT, &s->ep[DCI_OUT], td, td->total);
+            x->msc_moved += (uint32_t)td->total;
+            if (x->msc_moved >= x->msc_expected) x->msc_state = MSC_STATUS;
+        } else {
+            if (!s->ep_running[DCI_IN] || !td_peek(x, &s->ep[DCI_IN], td)) return;
+            uint8_t csw[13] = "USBS";
+            uint32_t residue = x->msc_expected > x->msc_moved ? x->msc_expected - x->msc_moved : 0;
+            memcpy(csw + 4, &x->msc_tag, 4);
+            memcpy(csw + 8, &residue, 4);
+            csw[12] = x->msc_failed;
+            uint64_t n = td->total < sizeof csw ? td->total : sizeof csw;
+            td_copy(x, td, csw, n, 1);
+            td_complete(x, slot, DCI_IN, &s->ep[DCI_IN], td, n);
+            x->msc_state = MSC_COMMAND;
+        }
+    }
+}
+
+static void pc_run(HvXhci *x, int slot, int dci) {
+    struct HvXhciSlot *s = &x->slots[slot];
+    if (s->dev < 0) return;
+    if (dci == 1) pc_ep0(x, slot);
+    else if (x->kind[s->dev] == HV_USB_CDROM) pc_cd(x, slot);
+    else pc_hid_in(x, slot);
+}
+
 /* ---- commands ---- */
 
 static void init_ring_from_ctx(HvXhci *x, int slot, int dci) {
@@ -557,7 +964,7 @@ static int address_device(HvXhci *x, int slot, uint64_t input, int bsr) {
     rd(x, input + 64, ep0, 32);
     int port = slot_ctx[6]; /* root hub port number, dword 1 bits 23:16 */
     int dev = port - 1;
-    if (dev < 0 || dev >= HV_XHCI_DEVICES) return CC_TRB_ERROR;
+    if (dev < 0 || dev >= x->nports) return CC_TRB_ERROR;
     x->slots[slot].dev = dev;
     uint32_t dw3 = (uint32_t)(bsr ? 1 : 2) << 27 | (uint32_t)(bsr ? 0 : slot); /* default or addressed; address = slot */
     memcpy(slot_ctx + 12, &dw3, 4);
@@ -701,10 +1108,16 @@ static void run_commands(HvXhci *x) {
 /* ---- ports ---- */
 
 /* Port 1 is the full-speed keyboard; port 2 is the high-speed trackpad, as the real
-   Magic Trackpad 2 is. */
+   Magic Trackpad 2 is. On the UEFI board the tablet is full-speed too, and the CD-ROM drive high-speed. */
+static uint32_t port_speed(HvXhci *x, int p) {
+    /* The port speed ids a controller without its own table has: 1 full, 2 low, 3 high. The virtual Mac's
+       trackpad has always said 2, and macOS works it. */
+    return x->kind[p] == HV_USB_CDROM ? 3 : x->kind[p] == HV_USB_TRACKPAD ? SPEED_HIGH : SPEED_FULL;
+}
+
 static void port_connect(HvXhci *x) {
-    for (int p = 0; p < HV_XHCI_PORTS; p++) {
-        x->portsc[p] = PORT_PP | PORT_CCS | PORT_CSC | (uint32_t)(p ? SPEED_HIGH : SPEED_FULL) << PORT_SPEED_SHIFT | 7u << PORT_PLS_SHIFT;
+    for (int p = 0; p < x->nports; p++) {
+        x->portsc[p] = PORT_PP | PORT_CCS | PORT_CSC | port_speed(x, p) << PORT_SPEED_SHIFT | 7u << PORT_PLS_SHIFT;
         port_event(x, p);
     }
 }
@@ -760,8 +1173,12 @@ static void reset(HvXhci *x) {
     x->tp_db = 0;
     x->tp_multi_logs = 0;
     x->tp_f1_len = 0;
-    for (int p = 0; p < HV_XHCI_PORTS; p++)
-        x->portsc[p] = PORT_PP | PORT_CCS | PORT_CSC | (uint32_t)(p ? SPEED_HIGH : SPEED_FULL) << PORT_SPEED_SHIFT | 7u << PORT_PLS_SHIFT;
+    x->tab_rhead = x->tab_rtail = 0;
+    x->msc_state = 0;
+    x->msc_len = x->msc_off = 0;
+    x->sense_key = x->sense_asc = 0;
+    for (int p = 0; p < x->nports; p++)
+        x->portsc[p] = PORT_PP | PORT_CCS | PORT_CSC | port_speed(x, p) << PORT_SPEED_SHIFT | 7u << PORT_PLS_SHIFT;
     update_irq(x);
 }
 
@@ -774,9 +1191,9 @@ static uint64_t bar_read(HvPciDev *d, int bar, uint64_t off, unsigned size) {
         if (n++ < 60) fprintf(stderr, "xhci: read +%llx (%u)\n", (unsigned long long)off, size);
     }
     if (off < CAPLENGTH) {
-        static const uint32_t cap[8] = {
+        const uint32_t cap[8] = {
             CAPLENGTH | 0x0100u << 16,                           /* CAPLENGTH, HCIVERSION 1.0 */
-            HV_XHCI_SLOTS | (uint32_t)HV_XHCI_INTRS << 8 | (uint32_t)HV_XHCI_PORTS << 24, /* slots, interrupters, ports */
+            HV_XHCI_SLOTS | (uint32_t)HV_XHCI_INTRS << 8 | (uint32_t)x->nports << 24, /* slots, interrupters, ports */
             1u << 4,                                             /* ERST max 2 segments */
             0,
             1u | (uint32_t)(XECP / 4) << 16,                     /* 64-bit addressing, extended caps */
@@ -789,7 +1206,8 @@ static uint64_t bar_read(HvPciDev *d, int bar, uint64_t off, unsigned size) {
         if (size == 8 && i + 1 < 8) v |= (uint64_t)cap[i + 1] << 32;
         v >>= 8 * (off & 3);
     } else if (off >= XECP && off < XECP + 16) { /* Supported Protocol: USB 2.0 on every port */
-        static const uint32_t ext[4] = {2u | 0x0200u << 16, 0x20425355, 1u | ((1u << HV_XHCI_PORTS) - 1u) << 8, 0};
+        /* Ports from 1, and how many (the virtual Mac's has always said 3 for its two). */
+        const uint32_t ext[4] = {2u | 0x0200u << 16, 0x20425355, 1u | (x->pc ? (uint32_t)x->nports : 3u) << 8, 0};
         uint32_t i = (uint32_t)(off - XECP) / 4;
         v = ext[i];
         if (size == 8 && i + 1 < 4) v |= (uint64_t)ext[i + 1] << 32;
@@ -805,7 +1223,7 @@ static uint64_t bar_read(HvPciDev *d, int bar, uint64_t off, unsigned size) {
         case 0x34: v = x->dcbaap >> 32; break;
         case 0x38: v = x->config; break;
         }
-    } else if (off >= PORTREGS && off < PORTREGS + 16u * HV_XHCI_PORTS) {
+    } else if (off >= PORTREGS && off < PORTREGS + 16u * (unsigned)x->nports) {
         int p = (int)(off - PORTREGS) / 16;
         v = (off - PORTREGS) % 16 == 0 ? x->portsc[p] : 0;
     } else if (off >= RT && off < RT + 0x20 + 32u * HV_XHCI_INTRS) {
@@ -847,7 +1265,7 @@ static void bar_write(HvPciDev *d, int bar, uint64_t off, uint64_t v, unsigned s
             if ((v & 1) && !(x->usbcmd & 1)) { /* run */
                 x->usbcmd = (uint32_t)v;
                 x->usbsts &= ~1u;
-                for (int p = 0; p < HV_XHCI_PORTS; p++)
+                for (int p = 0; p < x->nports; p++)
                     if (x->portsc[p] & PORT_CSC) port_event(x, p);
             } else if (!(v & 1)) {
                 x->usbcmd = (uint32_t)v;
@@ -879,7 +1297,7 @@ static void bar_write(HvPciDev *d, int bar, uint64_t off, uint64_t v, unsigned s
         case 0x34: set64(&x->dcbaap, r - 0x30, v, size); x->dcbaap &= ~0x3full; break;
         case 0x38: x->config = (uint32_t)v; break;
         }
-    } else if (off >= PORTREGS && off < PORTREGS + 16u * HV_XHCI_PORTS) {
+    } else if (off >= PORTREGS && off < PORTREGS + 16u * (unsigned)x->nports) {
         if ((off - PORTREGS) % 16 == 0) port_write(x, (int)(off - PORTREGS) / 16, (uint32_t)v);
     } else if (off >= RT + 0x20 && off < RT + 0x20 + 32u * HV_XHCI_INTRS) {
         struct HvXhciIntr *it = &x->intr[(off - RT - 0x20) / 32];
@@ -916,7 +1334,7 @@ static void bar_write(HvPciDev *d, int bar, uint64_t off, uint64_t v, unsigned s
         } else if (slot <= HV_XHCI_SLOTS && x->slots[slot].dev >= 0) {
             int dci = (int)(v & 0xff);
             if (dci < 1 || dci >= HV_XHCI_EPS) return;
-            if (x->slots[slot].dev == 1 && x->tp_db < 8) {
+            if (x->kind[x->slots[slot].dev] == HV_USB_TRACKPAD && x->tp_db < 8) {
                 x->tp_db++;
                 fprintf(stderr, "hengevm: xhci: trackpad: doorbell dci %d\n", dci);
             }
@@ -925,7 +1343,8 @@ static void bar_write(HvPciDev *d, int bar, uint64_t off, uint64_t v, unsigned s
             if (state == 2) return;
             if (state != 1) set_ep_state(x, slot, dci, 1);
             x->slots[slot].ep_running[dci] = 1;
-            if (dci == 1) run_ep0(x, slot);
+            if (x->pc) pc_run(x, slot, dci);
+            else if (dci == 1) run_ep0(x, slot);
             else run_ep_in(x, slot);
         }
     }
@@ -1122,15 +1541,39 @@ void hv_xhci_touch_button(HvXhci *x, int down) {
     hv_machine_wake(x->m);
 }
 
-void hv_xhci_poll(HvXhci *x) {
-    if (!x) return;
-    for (int slot = 1; slot <= HV_XHCI_SLOTS; slot++)
-        if (x->slots[slot].dev >= 0) run_ep_in(x, slot);
+void hv_xhci_pointer(HvXhci *x, int px, int py, int buttons, int wheel) {
+    if (!x || !x->pc) return;
+    px = px < 0 ? 0 : px > 32767 ? 32767 : px;
+    py = py < 0 ? 0 : py > 32767 ? 32767 : py;
+    uint8_t r[6] = {(uint8_t)(buttons & 7), (uint8_t)px, (uint8_t)(px >> 8), (uint8_t)py, (uint8_t)(py >> 8), (uint8_t)(int8_t)wheel};
+    pthread_mutex_lock(&x->mu);
+    /* A move on top of a move that has not gone out yet replaces it: the guest wants where the pointer is. */
+    uint8_t *last = x->tab_rtail != x->tab_rhead ? x->tab_reports[(x->tab_rtail - 1) % HV_TAB_REPORTS] : NULL;
+    if (last && last[0] == r[0] && !last[5] && !r[5]) memcpy(last, r, 6);
+    else if (x->tab_rtail - x->tab_rhead < HV_TAB_REPORTS) memcpy(x->tab_reports[x->tab_rtail++ % HV_TAB_REPORTS], r, 6);
+    memcpy(x->tab_state, r, 5);
+    pthread_mutex_unlock(&x->mu);
+    hv_machine_wake(x->m);
 }
 
-HvXhci *hv_xhci_create(HvMachine *m, HvPcie *bus) {
+void hv_xhci_poll(HvXhci *x) {
+    if (!x) return;
+    for (int slot = 1; slot <= HV_XHCI_SLOTS; slot++) {
+        if (x->slots[slot].dev < 0) continue;
+        if (x->pc) pc_run(x, slot, 3);
+        else run_ep_in(x, slot);
+    }
+}
+
+static HvXhci *create(HvMachine *m, HvPcie *bus, int pc, HvDisk *cdrom) {
     HvXhci *x = calloc(1, sizeof *x);
     x->m = m;
+    x->pc = pc;
+    x->cd = cdrom;
+    x->kind[0] = HV_USB_KEYBOARD;
+    x->kind[1] = pc ? HV_USB_TABLET : HV_USB_TRACKPAD;
+    x->kind[2] = HV_USB_CDROM;
+    x->nports = pc && cdrom ? 3 : 2;
     pthread_mutex_init(&x->mu, NULL);
     /* QEMU's xHCI IDs. Class 0x0c0330 with revision 0: macOS's IOPCIClassMatch compares all 32 bits. */
     hv_pci_init(&x->pci, 0x1b36, 0x000d, 0x0c033000, 0x1af4, 0x1100);
@@ -1147,3 +1590,6 @@ HvXhci *hv_xhci_create(HvMachine *m, HvPcie *bus) {
     reset(x);
     return x;
 }
+
+HvXhci *hv_xhci_create(HvMachine *m, HvPcie *bus) { return create(m, bus, 0, NULL); }
+HvXhci *hv_xhci_create_pc(HvMachine *m, HvPcie *bus, HvDisk *cdrom) { return create(m, bus, 1, cdrom); }

@@ -380,7 +380,7 @@ void hv_vmapple_destroy(HvVmapple *b) {
     free(b->balloon);
     if (b->keyboard) { pthread_mutex_destroy(&b->keyboard->mu); free(b->keyboard); }
     if (b->mouse) { pthread_mutex_destroy(&b->mouse->mu); free(b->mouse); }
-    if (b->usb) { pthread_mutex_destroy(&b->usb->mu); free(b->usb); }
+    if (b->usb) { pthread_mutex_destroy(&b->usb->mu); free(b->usb->msc_buf); free(b->usb); }
     if (b->gic) { pthread_mutex_destroy(&b->gic->mu); free(b->gic); }
     free(b->net);
     free(b->pcie);

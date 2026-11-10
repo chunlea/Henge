@@ -72,7 +72,12 @@ int hv_virt_create(HvVmapple *b, HvMachine *m, HvCpu *cpus, const HvVirtParams *
     if (p->disk && kind && !strcmp(kind, "virtio")) {
         if (!(b->root_blk = hv_virtio_blk_create(m, b->pcie, p->disk, HV_VBLK_PLAIN))) return -1;
     } else if (p->disk && !(b->nvme = hv_nvme_create(m, b->pcie, p->disk))) return -1;
-    if (p->cdrom && !(b->aux_blk = hv_virtio_blk_create(m, b->pcie, p->cdrom, HV_VBLK_PLAIN))) return -1;
+    /* Keyboard, pointer and installation media are USB devices, which Windows has drivers for.
+       HV_VIRT_CD=virtio: the media as a virtio disk instead (the firmware can start from it; Windows cannot read it). */
+    const char *cd = getenv("HV_VIRT_CD");
+    int virtio_cd = cd && !strcmp(cd, "virtio");
+    if (p->cdrom && virtio_cd && !(b->aux_blk = hv_virtio_blk_create(m, b->pcie, p->cdrom, HV_VBLK_PLAIN))) return -1;
+    if (!getenv("HV_NO_XHCI")) b->usb = hv_xhci_create_pc(m, b->pcie, virtio_cd ? NULL : p->cdrom);
     if (p->mac) b->net = hv_virtio_net_create(m, b->pcie, p->mac);
     b->keyboard = hv_virtio_input_create(m, b->pcie, HV_VINPUT_KEYBOARD);
     b->mouse = hv_virtio_input_create(m, b->pcie, HV_VINPUT_MOUSE);
