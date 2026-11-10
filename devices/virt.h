@@ -28,6 +28,8 @@
 #define VIRT_PCIE_ECAM   0x3f000000ull
 #define VIRT_PCIE_ECAM_SIZE 0x01000000ull /* buses 0-15 */
 #define VIRT_MEM         0x40000000ull
+#define VIRT_PCIE_MMIO64 0x8000000000ull /* a second PCI window, for 64-bit BARs (a GPU's shared memory) */
+#define VIRT_PCIE_MMIO64_SIZE 0x8000000000ull
 
 /* SPI numbers; the INTID is 32 more. */
 #define VIRT_IRQ_UART 1

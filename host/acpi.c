@@ -168,6 +168,9 @@ static void dsdt_body(Buf *d, const HvVmapple *b) {
     u8(&res, 0x87), u16(&res, 0x17), u8(&res, 0), u8(&res, 0x0c), u8(&res, 1); /* DWordMemory, fixed ends, read-write */
     u32(&res, 0), u32(&res, (uint32_t)VIRT_PCIE_MMIO), u32(&res, (uint32_t)(VIRT_PCIE_MMIO + VIRT_PCIE_MMIO_SIZE - 1)), u32(&res, 0),
         u32(&res, (uint32_t)VIRT_PCIE_MMIO_SIZE);
+    u8(&res, 0x8a), u16(&res, 0x2b), u8(&res, 0), u8(&res, 0x0c), u8(&res, 1); /* QWordMemory: the window above RAM */
+    u64(&res, 0), u64(&res, VIRT_PCIE_MMIO64), u64(&res, VIRT_PCIE_MMIO64 + VIRT_PCIE_MMIO64_SIZE - 1), u64(&res, 0),
+        u64(&res, VIRT_PCIE_MMIO64_SIZE);
     aml_resources(&dev, "_CRS", &res);
     /* _OSC: the system may have every PCIe feature it asks for (Return (Arg3)). */
     u8(&in, 0xa4), u8(&in, 0x6b);

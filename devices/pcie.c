@@ -37,7 +37,7 @@ void hv_pci_init(HvPciDev *d, uint16_t vendor, uint16_t device, uint32_t class_r
 void hv_pci_add_bar(HvPciDev *d, int bar, uint64_t size, int is64) {
     d->bar_size[bar] = size;
     d->bar64[bar] = (uint8_t)is64;
-    put32(d->config + 0x10 + bar * 4, is64 ? 0x4 : 0x0); /* memory, 32/64-bit, not prefetchable */
+    put32(d->config + 0x10 + bar * 4, is64 == 2 ? 0xc : is64 ? 0x4 : 0x0); /* memory, 32/64-bit; prefetchable when is64 is 2 */
     put32(d->wmask + 0x10 + bar * 4, (uint32_t)~(size - 1) & ~0xfu);
     if (is64) put32(d->wmask + 0x14 + bar * 4, (uint32_t)(~(size - 1) >> 32));
 }
@@ -129,6 +129,31 @@ static void window_write(void *opaque, uint64_t off, uint64_t v, unsigned size) 
     uint64_t boff;
     HvPciDev *d = bar_lookup(p, p->mmio_base + off, &bar, &boff);
     if (d && d->bar_write) d->bar_write(d, bar, boff, v, size);
+}
+
+typedef struct Window { HvPcie *p; uint64_t base; } Window;
+
+static uint64_t window2_read(void *opaque, uint64_t off, unsigned size) {
+    Window *w = opaque;
+    int bar;
+    uint64_t boff;
+    HvPciDev *d = bar_lookup(w->p, w->base + off, &bar, &boff);
+    if (!d || !d->bar_read) return ~0ull;
+    return d->bar_read(d, bar, boff, size);
+}
+
+static void window2_write(void *opaque, uint64_t off, uint64_t v, unsigned size) {
+    Window *w = opaque;
+    int bar;
+    uint64_t boff;
+    HvPciDev *d = bar_lookup(w->p, w->base + off, &bar, &boff);
+    if (d && d->bar_write) d->bar_write(d, bar, boff, v, size);
+}
+
+void hv_pcie_add_window(HvPcie *p, uint64_t mmio_pa, uint64_t mmio_size) {
+    Window *w = calloc(1, sizeof *w);
+    w->p = p, w->base = mmio_pa;
+    hv_machine_add_mmio(p->m, mmio_pa, mmio_size, w, window2_read, window2_write, "pcie-mmio64");
 }
 
 int hv_pcie_attach(HvPcie *p, HvPciDev *d) {
