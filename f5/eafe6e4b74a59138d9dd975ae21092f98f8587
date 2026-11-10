@@ -1,0 +1,19 @@
+docs/windows-guest.md
+  s_be58c8822e297c::t_ea438d4d1d8d46 43-45,95-96,115-128
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "f5eafe6e4b74a59138d9dd975ae21092f98f8587",
+  "prompts": {},
+  "sessions": {
+    "s_be58c8822e297c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "460830a0-c917-44aa-9aea-92d45fd794ef",
+        "model": "unknown"
+      },
+      "human_author": "chunli <git@chunli.dev>"
+    }
+  }
+}
