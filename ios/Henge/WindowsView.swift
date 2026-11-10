@@ -57,7 +57,7 @@ final class WindowsInstaller: ObservableObject {
     static let shared = WindowsInstaller()
 
     @Published private(set) var working: String?
-    @Published private(set) var copied: Double = 0
+    @Published fileprivate(set) var copied: Double = 0
     @Published var failure: String?
 
     var busy: Bool { working != nil }
@@ -76,8 +76,11 @@ final class WindowsInstaller: ObservableObject {
     }
 
     /// A raw disk with Windows on it already (made by hengevm on a Mac, for one): copied in as a new machine.
+    /// One packed with its holes left out (build/hvsparse pack, as tools/export_ios.sh packs a Mac's) is unpacked.
     func importDisk(_ url: URL, ramMB: Int) {
-        make(name: url.deletingPathExtension().lastPathComponent, ramMB: ramMB, working: "Bringing in \(url.lastPathComponent)…",
+        var name = url.deletingPathExtension().lastPathComponent
+        if url.pathExtension == "hvsparse" { name = (name as NSString).deletingPathExtension }
+        make(name: name, ramMB: ramMB, working: "Bringing in \(url.lastPathComponent)…",
              source: url) { $0.disk }
     }
 
@@ -123,7 +126,18 @@ final class WindowsInstaller: ObservableObject {
                     }
                 }
                 defer { watch.cancel() }
-                try await Task.detached { try FileManager.default.copyItem(at: source, to: target) }.value
+                if source.pathExtension == "hvsparse" {
+                    watch.cancel() // the unpacking says how far it is
+                    let ok = await Task.detached {
+                        hv_sparse_unpack(source.path, target.path, { done, total, _ in
+                            let fraction = Double(done) / Double(max(total, 1))
+                            Task { @MainActor in WindowsInstaller.shared.copied = fraction }
+                        }, nil) == 0
+                    }.value
+                    guard ok else { throw Self.message("\(source.lastPathComponent) could not be unpacked (not enough space?).") }
+                } else {
+                    try await Task.detached { try FileManager.default.copyItem(at: source, to: target) }.value
+                }
                 mac.diskBytes = (try? fm.attributesOfItem(atPath: mac.disk.path)[.size] as? Int64) ?? 0
                 let info = MachineFile(name: mac.name, system: "windows", ecid: 0, seed: 0, ramMB: mac.ramMB)
                 try JSONEncoder().encode(info).write(to: mac.directory.appendingPathComponent("machine.json"))
