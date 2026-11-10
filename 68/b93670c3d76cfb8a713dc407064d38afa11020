@@ -1,0 +1,35 @@
+devices/virtio_gpu_virgl.c
+  s_8c78c10c465712::t_4e1ac18cb1f6ee 113-114,186,245-246,253,380,394-396,428-464,470-497,499,506
+host/vm.c
+  s_35b85a8b2ebd1e::t_7f067c16f8e0d5 673-674
+ios/Henge/BootDisplay.swift
+  s_8c78c10c465712::t_2db426bda9c301 80
+ios/Henge/EngineTuning.swift
+  s_8c78c10c465712::t_1adfc0472ee184 31-33
+ios/Henge/LinuxScreen.swift
+  s_8c78c10c465712::t_ded5a29c193227 86
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "68b93670c3d76cfb8a713dc407064d38afa11020",
+  "prompts": {},
+  "sessions": {
+    "s_35b85a8b2ebd1e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "766eb688-950f-4d1b-9ce1-2388107f5b48",
+        "model": "claude-fable-5-2"
+      },
+      "human_author": "chunli <git@chunli.dev>"
+    },
+    "s_8c78c10c465712": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "eafea5fd-aa24-43fe-89eb-7105f6b20466",
+        "model": "claude-fable-5-2"
+      },
+      "human_author": "chunli <git@chunli.dev>"
+    }
+  }
+}
