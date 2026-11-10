@@ -1,0 +1,37 @@
+devices/virtio_gpu_metal.m
+  s_be58c8822e297c::t_38489bfd42812c 56-66
+devices/virtio_gpu_virgl.c
+  s_be58c8822e297c::t_6e381d9bdf1dc3 103,205,242,380-389,412,627,629,645-646,740-741,908-910,1005-1007,1013-1028
+devices/virtio_gpu.c
+  s_be58c8822e297c::t_e4ce2bcf47fa6e 307-319
+devices/virtio_gpu.h
+  s_be58c8822e297c::t_b421b55b9c74e3 49-52
+host/main.c
+  s_be58c8822e297c::t_bd7968b3724033 551
+host/vm.c
+  s_be58c8822e297c::t_c62b16e807a6aa 80-97
+host/vm.h
+  s_be58c8822e297c::t_9d14c9d94f5a68 53-56
+ios/Henge/Native/henge-vm.c
+  s_be58c8822e297c::t_fbb92d58c4e978 377-389
+ios/Henge/Native/henge-vm.h
+  s_be58c8822e297c::t_3fdd4779e45319 26-30
+ios/Henge/SessionView.swift
+  s_be58c8822e297c::t_92377edf3c7df6 50-54,65,67,670-671,780-795
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "c81ca7a54288525772ecc1f394df7aae322e94f2",
+  "prompts": {},
+  "sessions": {
+    "s_be58c8822e297c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "460830a0-c917-44aa-9aea-92d45fd794ef",
+        "model": "unknown"
+      },
+      "human_author": "chunli <git@chunli.dev>"
+    }
+  }
+}
