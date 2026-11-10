@@ -447,7 +447,7 @@ static uint32_t create(HvGpuVirgl *v, struct virgl_renderer_resource_create_args
     /* Henge reads the scanout back rather than sharing it with the host, so nothing is shared: without SCANOUT and
        SHARED a resource is an ordinary GL texture. With them virglrenderer backs it by an external image, and stores
        an alpha-less one (B8G8R8X8, which Linux scans out) as RGB8, which ANGLE can neither render to nor read back. */
-    a->bind &= ~(VIRGL_BIND_SCANOUT | VIRGL_BIND_SHARED);
+    if (!v->g->d3d) a->bind &= ~(VIRGL_BIND_SCANOUT | VIRGL_BIND_SHARED); /* a Direct3D device's are as its driver asks */
     if (msaa_pretended && a->nr_samples > 1) a->nr_samples = 0; /* see caps_pretend_msaa */
     if (vr.resource_create(a, NULL, 0)) { free(r); return RESP_ERR_UNSPEC; }
     r->id = a->handle, r->format = a->format, r->w = a->width, r->h = a->height;
@@ -844,7 +844,7 @@ static uint32_t control(HvGpuVirgl *v, Req *q) {
         uint8_t *out = calloc(1, 24 + max_size);
         if (!out) { type = RESP_ERR_OUT_OF_MEMORY; break; }
         vr.fill_caps(id, version, out + 24);
-        caps_pretend_msaa(out + 24, max_size);
+        if (!g->d3d) caps_pretend_msaa(out + 24, max_size);
         Hdr o = {.type = RESP_OK_CAPSET, .flags = h.flags & FLAG_FENCE, .fence_id = h.fence_id, .ctx_id = h.ctx_id};
         memcpy(out, &o, sizeof o);
         uint32_t w = hv_virtq_write(&g->vio, e, 0, out, 24 + max_size);
