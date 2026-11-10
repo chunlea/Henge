@@ -1,0 +1,35 @@
+core/machine.h
+  s_c77b5918bb7381::t_69148027dde4d1 218-227
+core/mmu.c
+  s_c77b5918bb7381::t_95cc4c873b4bd4 147-148,165,510-600,808-810,902-903,944-947
+core/mmu.h
+  s_c77b5918bb7381::t_f8d9375f136445 60-62
+core/sysreg.c
+  s_6b10bcb45686a0::t_c4bde8772e58ac 396
+tests/test_mmu.c
+  s_c77b5918bb7381::t_c370e9510c9fa4 201-236
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "6a3289432760716be3018952a6217a6e1650c3f8",
+  "prompts": {},
+  "sessions": {
+    "s_6b10bcb45686a0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5c1399db-7f80-4963-8ae9-9dd2f10e81e9",
+        "model": "unknown"
+      },
+      "human_author": "chunli <git@chunli.dev>"
+    },
+    "s_c77b5918bb7381": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "28dddce1-95ce-4d14-ab1f-49986484a8f3",
+        "model": "unknown"
+      },
+      "human_author": "chunli <git@chunli.dev>"
+    }
+  }
+}
