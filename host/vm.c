@@ -22,6 +22,7 @@
 #include "dispatch.h"
 #include "net_slirp.h"
 #include "linux_boot.h"
+#include "uefi_boot.h"
 
 static HvMachine m;
 static HvCpu cpus[HV_MAX_CPUS]; /* the board takes them as an array */
@@ -76,7 +77,7 @@ size_t hv_vm_serial_input(const uint8_t *buf, size_t len) {
 
 int hv_vm_boot_display(HvBootDisplay *d) {
     if (board.fb_size) { /* Linux: its simple-framebuffer, or what virtio-gpu put there with the cursor drawn on */
-        d->pixels = board.ram + (board.fb_base - VMAPPLE_MEM);
+        d->pixels = board.ram + (board.fb_base - board.mem_base);
         if (board.gpu) {
             static uint32_t *composed;
             if (!composed) composed = malloc((size_t)board.fb_width * board.fb_height * 4);
@@ -273,7 +274,8 @@ int hv_vm_create(const HvVmConfig *c, char *err, size_t errlen) {
         primary_started = 0;
     }
     int linux_guest = c->linux_kernel != NULL || c->linux_from_disk;
-    if (!linux_guest && (!c->rom || !c->disk || !c->aux))
+    int uefi = c->uefi_code != NULL;
+    if (!linux_guest && !uefi && (!c->rom || !c->disk || !c->aux))
         return fail(err, errlen, "The ROM, disk and auxiliary storage are all needed.");
     machine_created = 1;
     struct sigaction ill = {.sa_flags = SA_SIGINFO | SA_ONSTACK};
@@ -285,15 +287,16 @@ int hv_vm_create(const HvVmConfig *c, char *err, size_t errlen) {
         signals_installed = 1;
     }
     signal(SIGPIPE, SIG_IGN); /* a guest connection closing at the far end must not end the machine */
-    int have_disk = c->disk != NULL, have_aux = !linux_guest && c->aux;
+    int have_disk = c->disk != NULL, have_aux = !linux_guest && !uefi && c->aux;
     if (have_disk && hv_disk_open(&disk, c->disk, 0, 0) != 0) return fail(err, errlen, "Cannot open the disk image.");
     if (have_aux && hv_disk_open(&aux, c->aux, c->aux_offset ? c->aux_offset : 16384, 0) != 0)
         return fail(err, errlen, "Cannot open the auxiliary storage.");
     size_t jit = c->jit_bytes ? c->jit_bytes : (size_t)768 << 20;
     /* A Linux guest maps its memory in 4 KB pages, which a 16 KB TLB entry cannot hold: its TLB holds 4 KB pages.
+       UEFI firmware and Windows do the same.
        HV_TLB_PAGE_BITS (12 or 14) overrides, for measuring. */
     const char *tpb = getenv("HV_TLB_PAGE_BITS");
-    hv_set_tlb_page_bits(tpb && (atoi(tpb) == 12 || atoi(tpb) == 14) ? atoi(tpb) : linux_guest ? 12 : 14);
+    hv_set_tlb_page_bits(tpb && (atoi(tpb) == 12 || atoi(tpb) == 14) ? atoi(tpb) : linux_guest || uefi ? 12 : 14);
     int r = c->jit_rx ? hv_machine_init_jit(&m, c->jit_rx, c->jit_rw, jit) : hv_machine_init(&m, jit);
     if (r != 0) return fail(err, errlen, "Cannot set up the JIT region.");
     m.log = c->log;
@@ -310,8 +313,16 @@ int hv_vm_create(const HvVmConfig *c, char *err, size_t errlen) {
         cfg.run_installer1 = a, cfg.run_installer2 = b2;
     }
     static const uint8_t mac[6] = {0x02, 0x48, 0x56, 0x4d, 0x00, 0x01};
-    if (hv_vmapple_create(&board, &m, cpus, (c->ram_mb ? c->ram_mb : 2048) << 20, have_disk ? &disk : NULL,
-                          have_aux ? &aux : NULL, &cfg, mac) != 0)
+    if (uefi) {
+        HvVirtParams vp = {.ncpus = ncpus, .ram_size = (c->ram_mb ? c->ram_mb : 4096) << 20, .disk = have_disk ? &disk : NULL,
+                           .mac = mac, .vars_path = c->uefi_vars};
+        if (hv_virt_create(&board, &m, cpus, &vp) != 0)
+            return fail(err, errlen, "Cannot build the machine (not enough memory for the guest's RAM?).");
+        HvUefiBoot ub = {.code = c->uefi_code, .dtb_out = getenv("HV_DTB_OUT")};
+        if (hv_uefi_load(&board, &ub, err, errlen) != 0) return -1;
+        if (serial_out) board.uart->output = serial_out, board.uart->output_opaque = serial_out_opaque;
+    } else if (hv_vmapple_create(&board, &m, cpus, (c->ram_mb ? c->ram_mb : 2048) << 20, have_disk ? &disk : NULL,
+                                 have_aux ? &aux : NULL, &cfg, mac) != 0)
         return fail(err, errlen, "Cannot build the machine (not enough memory for the guest's RAM?).");
     if (linux_guest) {
         /* The display: the top of RAM, 2 MB aligned, left out of the guest's memory node. */
@@ -319,17 +330,17 @@ int hv_vm_create(const HvVmConfig *c, char *err, size_t errlen) {
         board.fb_height = c->fb_height ? c->fb_height : getenv("HV_FB_H") ? atoi(getenv("HV_FB_H")) : 800;
         uint64_t fb = ((uint64_t)board.fb_width * board.fb_height * 4 + (2ull << 20) - 1) & ~((2ull << 20) - 1);
         board.fb_size = fb;
-        board.fb_base = VMAPPLE_MEM + board.ram_size - fb;
+        board.fb_base = board.mem_base + board.ram_size - fb;
         if (!getenv("HV_LINUX_SIMPLEFB"))
             board.gpu = hv_virtio_gpu_create(&m, board.pcie, board.fb_width, board.fb_height,
-                                             (uint32_t *)(void *)(board.ram + (board.fb_base - VMAPPLE_MEM)));
+                                             (uint32_t *)(void *)(board.ram + (board.fb_base - board.mem_base)));
         hv_vmapple_reset_cpu(&board);
         HvLinuxBoot lb = {.kernel = c->linux_kernel, .initrd = c->linux_initrd, .cmdline = c->linux_cmdline,
                           .disk = c->disk, .extra = c->linux_extra,
                           .dtb_out = getenv("HV_DTB_OUT")};
         if (hv_linux_load(&board, &lb, err, errlen) != 0) return -1;
         if (serial_out) board.uart->output = serial_out, board.uart->output_opaque = serial_out_opaque;
-    } else {
+    } else if (!uefi) {
         if (hv_vmapple_load_rom(&board, c->rom) != 0) return fail(err, errlen, "Cannot read the ROM (AVPBooter.vmapple2.bin).");
         hv_vmapple_reset_cpu(&board);
     }
@@ -656,7 +667,7 @@ int hv_vm_pointer(int *x, int *y) {
 
 int hv_vm_snapshot(uint8_t *bgra, int width, int height) {
     if (board.fb_size && width > 0 && height > 0) { /* Linux: its framebuffer, scaled (nearest) */
-        const uint32_t *src = (const uint32_t *)(const void *)(board.ram + (board.fb_base - VMAPPLE_MEM));
+        const uint32_t *src = (const uint32_t *)(const void *)(board.ram + (board.fb_base - board.mem_base));
         uint32_t *dst = (uint32_t *)(void *)bgra;
         for (int y = 0; y < height; y++) {
             const uint32_t *row = src + (uint64_t)((uint64_t)y * board.fb_height / (uint64_t)height) * board.fb_width;

@@ -914,7 +914,8 @@ static void *cpu_thread(void *unused) {
 static void usage(void) {
     fprintf(stderr, "usage: hengevm --rom FILE --disk FILE --aux FILE --ecid N [--seed N] [--ram MB] [--log N] [--trace 1] [--screenshot PNG] [--watch VA] [--stats SECONDS [--profile 1]] [--cpus N] [--window] [--no-pvg] [--no-chain] [--break PC [--break-hits N]] [--dump PA LEN FILE] [--aux-offset BYTES] [--install IPSW]\n"
                     "       hengevm --linux KERNEL [--initrd FILE] [--append CMDLINE] [--disk FILE] [--ram MB] [--cpus N] [--window]\n"
-                    "       hengevm --linux-disk --disk FILE [--append-extra ARGS] [--ram MB] [--cpus N] [--window]\n");
+                    "       hengevm --linux-disk --disk FILE [--append-extra ARGS] [--ram MB] [--cpus N] [--window]\n"
+                    "       hengevm --uefi FIRMWARE [--uefi-vars FILE] [--disk FILE] [--ram MB] [--cpus N]\n");
     exit(2);
 }
 
@@ -977,6 +978,7 @@ int main(int argc, char **argv) {
     const char *rom = NULL, *disk_path = NULL, *aux_path = NULL;
     const char *linux_kernel = NULL, *linux_initrd = NULL, *linux_cmdline = NULL, *linux_extra = NULL;
     int linux_from_disk = 0;
+    const char *uefi_code = NULL, *uefi_vars = NULL;
     uint64_t seed = 0, ecid = 0, ram_mb = 4096, aux_offset = 16384;
     const char *install_ipsw = NULL;
     const char *share_folder = NULL;
@@ -1019,6 +1021,8 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--disk")) disk_path = argv[++i];
         else if (!strcmp(argv[i], "--linux")) linux_kernel = argv[++i]; /* a Linux guest: kernel, UKI or zboot image */
         else if (!strcmp(argv[i], "--linux-disk")) linux_from_disk = 1; /* Linux, from the --disk's own boot entry */
+        else if (!strcmp(argv[i], "--uefi")) uefi_code = argv[++i]; /* a guest started by UEFI firmware (edk2-aarch64-code.fd) */
+        else if (!strcmp(argv[i], "--uefi-vars")) uefi_vars = argv[++i];
         else if (!strcmp(argv[i], "--append-extra")) linux_extra = argv[++i];
         else if (!strcmp(argv[i], "--initrd")) linux_initrd = argv[++i];
         else if (!strcmp(argv[i], "--append")) linux_cmdline = argv[++i];
@@ -1048,14 +1052,16 @@ int main(int argc, char **argv) {
         else usage();
     }
     if (linux_from_disk && !disk_path) usage();
-    if (!linux_kernel && !linux_from_disk && (!rom || !disk_path || !aux_path)) usage();
+    if (uefi_code) use_pvg = 0; /* no Apple graphics device on that board */
+    if (!linux_kernel && !linux_from_disk && !uefi_code && (!rom || !disk_path || !aux_path)) usage();
     setvbuf(stderr, NULL, _IONBF, 0);
 
     HvVmConfig vc = {.rom = rom, .disk = disk_path, .aux = aux_path, .aux_offset = aux_offset, .ecid = ecid, .seed = seed,
                      .ram_mb = ram_mb, .ncpus = ncpus, .log = log, .no_net = getenv("HV_NO_NET") != NULL,
                      .installer = install_ipsw != NULL,
                      .linux_kernel = linux_kernel, .linux_initrd = linux_initrd, .linux_cmdline = linux_cmdline,
-                     .linux_from_disk = linux_from_disk, .linux_extra = linux_extra};
+                     .linux_from_disk = linux_from_disk, .linux_extra = linux_extra,
+                     .uefi_code = uefi_code, .uefi_vars = uefi_vars};
     if (getenv("HV_JIT_MB")) vc.jit_bytes = (size_t)atoi(getenv("HV_JIT_MB")) << 20; /* debugging: a small region flushes often */
     hv_prof_register = hv_prof_register_thread;
     char err[256];
@@ -1098,7 +1104,7 @@ int main(int argc, char **argv) {
     if (pvg_on) hv_vm_set_poll(hv_pvg_poll);
     run_args = (RunArgs){brk, brk_hits, dump_pa, dump_len, dump_path};
     /* The CPU runs on its own thread: the graphics framework needs the main queue. */
-    if (linux_kernel || linux_from_disk) {
+    if (linux_kernel || linux_from_disk || uefi_code) {
         pthread_t st;
         pthread_create(&st, NULL, serial_stdin_thread, NULL);
         if (getenv("HV_FB_SHOT")) pthread_create(&st, NULL, fb_shot_thread, getenv("HV_FB_SHOT"));

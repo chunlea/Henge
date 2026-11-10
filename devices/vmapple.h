@@ -84,12 +84,21 @@ typedef struct HvVmapple {
     uint64_t fb_base, fb_size;
     uint32_t fb_width, fb_height;
     HvVirtioGpu *gpu;        /* Linux's display, drawing into the framebuffer memory (NULL: a simple-framebuffer there) */
+    uint64_t mem_base;       /* where guest RAM starts: VMAPPLE_MEM, or VIRT_MEM on the UEFI board (devices/virt.h) */
+    /* The UEFI board only: */
+    struct HvFwCfg *fwcfg;
+    struct HvPflash *vars;   /* the firmware's variables */
+    uint8_t *fw_code;        /* the firmware itself, read-only to the guest */
 } HvVmapple;
 
 /* Builds the machine around m and cfg->nr_cpus CPUs (cpus is an array of them). Disks may be NULL (no device then).
    Guest RAM is reserved, not committed: pages are only used once touched. */
 int hv_vmapple_create(HvVmapple *b, HvMachine *m, HvCpu *cpus, uint64_t ram_size, HvDisk *root, HvDisk *aux,
                       const HvCfgParams *cfg, const uint8_t mac[6]);
+/* What the boards share (devices/virt.c is the other one): guest RAM of b->ram_size bytes into b->ram
+   (0, or -1), and the tick that drives every device a board has. */
+int hv_vmapple_alloc_ram(HvVmapple *b);
+uint64_t hv_vmapple_tick(HvMachine *m, HvCpu *cpu);
 /* Copies a boot ROM image into the firmware region. */
 int hv_vmapple_load_rom(HvVmapple *b, const char *path);
 /* CPU reset: EL1, MMU off, interrupts masked, at the start of the ROM. */

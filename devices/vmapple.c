@@ -16,6 +16,7 @@
 #include <time.h>
 
 #include "timer.h"
+#include "virt.h"
 
 #define ROM_SIZE 0x00100000ull
 
@@ -236,7 +237,7 @@ static uint64_t tick_locked(HvMachine *m, HvCpu *cpu) {
 }
 
 /* Devices and the GIC are shared by the CPUs: one at a time. */
-static uint64_t tick(HvMachine *m, HvCpu *cpu) {
+uint64_t hv_vmapple_tick(HvMachine *m, HvCpu *cpu) {
     if (cpu->index != 0) return hv_timer_update(((HvVmapple *)m->tick_opaque)->gic, cpu); /* its own timer: the GIC's lock only */
     hv_dev_lock(m);
     uint64_t deadline = tick_locked(m, cpu);
@@ -244,15 +245,8 @@ static uint64_t tick(HvMachine *m, HvCpu *cpu) {
     return deadline;
 }
 
-int hv_vmapple_create(HvVmapple *b, HvMachine *m, HvCpu *cpu, uint64_t ram_size, HvDisk *root, HvDisk *aux,
-                      const HvCfgParams *cfg, const uint8_t mac[6]) {
-    memset(b, 0, sizeof *b);
-    b->ram_fd = -1;
-    b->m = m;
-    b->cpu = cpu;
-    b->ncpus = cfg->nr_cpus ? (int)cfg->nr_cpus : 1;
-    if (b->ncpus > HV_MAX_CPUS) b->ncpus = HV_MAX_CPUS;
-    b->ram_size = ram_size;
+int hv_vmapple_alloc_ram(HvVmapple *b) {
+    uint64_t ram_size = b->ram_size;
     /* HV_RAM_FILE: guest RAM in a file. iOS's memory limit counts anonymous
        pages and not pages of a mapped file, which it can also write out and
        drop by itself, so the guest can have more RAM than the app may hold.
@@ -284,7 +278,20 @@ int hv_vmapple_create(HvVmapple *b, HvMachine *m, HvCpu *cpu, uint64_t ram_size,
         }
     }
     if (b->ram == MAP_FAILED) b->ram = mmap(NULL, ram_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
-    if (b->ram == MAP_FAILED) return -1;
+    return b->ram == MAP_FAILED ? -1 : 0;
+}
+
+int hv_vmapple_create(HvVmapple *b, HvMachine *m, HvCpu *cpu, uint64_t ram_size, HvDisk *root, HvDisk *aux,
+                      const HvCfgParams *cfg, const uint8_t mac[6]) {
+    memset(b, 0, sizeof *b);
+    b->ram_fd = -1;
+    b->m = m;
+    b->cpu = cpu;
+    b->ncpus = cfg->nr_cpus ? (int)cfg->nr_cpus : 1;
+    if (b->ncpus > HV_MAX_CPUS) b->ncpus = HV_MAX_CPUS;
+    b->ram_size = ram_size;
+    b->mem_base = VMAPPLE_MEM;
+    if (hv_vmapple_alloc_ram(b) != 0) return -1;
     b->rom = mmap(NULL, ROM_SIZE, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
     if (b->rom == MAP_FAILED) return -1;
     /* QEMU maps the firmware as RAM, and so do we. */
@@ -331,7 +338,7 @@ int hv_vmapple_create(HvVmapple *b, HvMachine *m, HvCpu *cpu, uint64_t ram_size,
         b->bdif->usb = b->vusb;
     }
 
-    m->tick = tick;
+    m->tick = hv_vmapple_tick;
     m->tick_opaque = b;
     cpu->m = m;
     return 0;
@@ -385,6 +392,9 @@ void hv_vmapple_destroy(HvVmapple *b) {
     free(b->ctrr);
     free(b->sealed);
     free(b->cfg);
+    hv_fw_cfg_destroy(b->fwcfg);
+    hv_pflash_destroy(b->vars);
+    if (b->fw_code && b->fw_code != MAP_FAILED) munmap(b->fw_code, VIRT_FLASH_SIZE);
     if (b->rom && b->rom != MAP_FAILED) munmap(b->rom, ROM_SIZE);
     if (b->ram && b->ram != MAP_FAILED) munmap(b->ram, b->ram_size);
     if (b->ram_fd >= 0) close(b->ram_fd);
