@@ -1,0 +1,29 @@
+core/cpu.h
+  s_862d92eac8a50c::t_2f90d2acb88dfc 291
+core/dispatch.c
+  s_862d92eac8a50c::t_83885d07ca7764 90,285,980-987,1045,1134-1137
+core/exception.c
+  s_862d92eac8a50c::t_16cda5c5afa3d3 15,49-50,71
+core/exception.h
+  s_862d92eac8a50c::t_984e2d8cfa6469 22
+core/machine.h
+  s_862d92eac8a50c::t_1f89f890e07ad7 60
+core/translate.c
+  s_862d92eac8a50c::t_d7aa0e3511905e 1954,1962,2072
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "307315f10b4eae10a3087ed03b895ee0f8b3c77c",
+  "prompts": {},
+  "sessions": {
+    "s_862d92eac8a50c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2a2ea67b-10a4-470a-aa9f-ca4aec62a749",
+        "model": "unknown"
+      },
+      "human_author": "chunli <git@chunli.dev>"
+    }
+  }
+}
