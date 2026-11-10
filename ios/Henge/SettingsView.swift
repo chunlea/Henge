@@ -10,6 +10,8 @@ struct SettingsView: View {
     @AppStorage(VolumeClicks.modeKey) private var volumeMode = VolumeClicks.Mode.delayHold
     @AppStorage(VolumeClicks.swapKey) private var swapButtons = false
     @AppStorage(PhysicalMouseButtons.swapKey) private var swapMouseButtons = false
+    @AppStorage(LinuxSuperKey.key) private var linuxSuperKey = LinuxSuperKey.command
+    @AppStorage(LinuxSuperKey.optionSpaceKey) private var optionSpaceIsSuper = true
     @AppStorage(EngineTuning.refreshKey) private var refreshRate = 60
     @AppStorage(EngineTuning.fastFlushKey) private var fastFlush = true
     @AppStorage(EngineTuning.wfiSpinKey) private var wfiSpin = false
@@ -28,6 +30,22 @@ struct SettingsView: View {
             return "Tap then drag waits to see if you're holding or just clicking the volume button, but it unconditionally sends a single click regardless of whether you tap or hold, which results in shorter clicks at the cost of sending a click before holding."
         case .intercept:
             return "Activates the camera in order to intercept volume keys properly. This causes the volume keys to behave in the same way a mouse's buttons do, but it causes higher temperatures, as the camera is always on."
+        }
+    }
+
+    /// What the chosen Super key means for the chords iPadOS keeps.
+    private var linuxSuperKeyNote: String {
+        let kept = "\(Device.name == "iPad" ? "iPadOS" : "iOS") keeps Command-Space, Command-Tab and Command-H for itself, so they never reach Linux."
+        let apply = "For a hardware keyboard in Linux machines only. Applies the next time one starts."
+        switch linuxSuperKey {
+        case .command:
+            return kept + (optionSpaceIsSuper
+                ? " Option-Space sends Super-Space instead (the launcher), and Space with both Option keys held sends Super-Alt-Space. "
+                : " Choose another Super key, or use the launcher button in the session's controls. ") + apply
+        case .option:
+            return "Option is Super and Command is Alt. Option-Space is Super-Space, and Option-Command-Space is Super-Alt-Space. " + apply
+        case .control:
+            return "Control is Super and Command is Control, so Command-C copies in most Linux apps. With more than one keyboard language, Control-Space switches between them and does not reach Linux. " + apply
         }
     }
 
@@ -100,6 +118,17 @@ struct SettingsView: View {
                     }
                     .listRowBackground(Desk.card)
                 }
+                Section("Linux Keyboard") {
+                    Picker("Super key", selection: $linuxSuperKey) {
+                        ForEach(LinuxSuperKey.allCases) { Text($0.title).tag($0) }
+                    }
+                    if linuxSuperKey == .command {
+                        Toggle("Option-Space is Super-Space", isOn: $optionSpaceIsSuper)
+                    }
+                    Text(linuxSuperKeyNote)
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
+                .listRowBackground(Desk.card)
                 Section("Performance") {
                     Picker("Mac refresh rate", selection: $refreshRate) {
                         Text("30 Hz").tag(30)

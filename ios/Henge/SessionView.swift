@@ -9,6 +9,7 @@ struct SessionView: View {
     let close: () -> Void
 
     @StateObject private var display = DisplayRouter()
+    @ObservedObject private var sticky = StickyKeys.shared
     @State private var error: String?
     @State private var state: Int32 = 0
     @State private var bootAttempt = 0
@@ -192,6 +193,7 @@ struct SessionView: View {
         }
         .onAppear {
             UIApplication.shared.isIdleTimerDisabled = true
+            HardwareKeys.start(linux: mac.isLinux)
             HardwareMouse.shared.start()
             VolumeClicks.shared.start()
         }
@@ -289,6 +291,10 @@ struct SessionView: View {
                 Spacer()
                 tool("keyboard", "Keyboard") { typing = true }
                 Spacer()
+                if mac.isLinux {
+                    superTool(tint: Desk.text)
+                    Spacer()
+                }
                 pasteTool
                 Spacer()
                 tool("plus.magnifyingglass", "Zoom in") { zoomed = true }
@@ -375,6 +381,32 @@ struct SessionView: View {
         .accessibilityLabel(label)
     }
 
+    /// A Linux desktop's Super chords, for a touch screen and for a keyboard whose ⌘-Space iPadOS keeps: a tap
+    /// is Super-Space (the launcher), and holding it offers the rest. Super held stays down until the next key
+    /// or click, as the keyboard row's ⌘ does.
+    private func superTool(tint: Color) -> some View {
+        Menu {
+            Button("Launcher (Super-Space)") { Keys.chord(Keys.command, " ") }
+            Button("Menu (Super-Alt-Space)") {
+                henge_vm_key(Keys.option, 1)
+                Keys.chord(Keys.command, " ")
+                henge_vm_key(Keys.option, 0)
+            }
+            Button(sticky.down.contains(Keys.command) ? "Let Go of Super" : "Hold Super for the Next Key") {
+                sticky.toggle(Keys.command)
+            }
+        } label: {
+            Image(systemName: "square.grid.2x2")
+                .font(.system(size: 19, weight: .medium))
+                .foregroundStyle(sticky.down.contains(Keys.command) ? Desk.accentLight : tint)
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
+        } primaryAction: {
+            Keys.chord(Keys.command, " ")
+        }
+        .accessibilityLabel("Launcher")
+    }
+
     // MARK: Filling the phone
 
     @ViewBuilder private func floatingControls(_ layout: Layout) -> some View {
@@ -383,6 +415,7 @@ struct SessionView: View {
         let pill = HStack(spacing: 4) {
             tool("eye.slash", "Hide controls", tint: .white) { hideControls() }
             tool("keyboard", "Keyboard", tint: .white) { typing.toggle() }
+            if mac.isLinux { superTool(tint: .white) }
             pasteTool
             tool(zoomed ? "minus.magnifyingglass" : "plus.magnifyingglass", zoomed ? "Zoom out" : "Zoom in", tint: zoomed ? Desk.accentLight : .white) { zoomed.toggle() }
             tool("info.circle", "Details", tint: .white) { showDetails = true }
