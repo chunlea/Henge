@@ -1951,7 +1951,7 @@ static int translate_emit(HvMachine *m, HvBlock *b, const uint32_t *code, uint32
     e->flags = b->flags;
     e->slow_mem = m->slow_mem || hv_knob[HV_K_PREDSTAT]; /* HV_PREDSTAT (measuring): every access through hv_mem_emulate */
     e->page = b->va & ~((1ull << HV_TLB_PAGE_BITS) - 1);
-    e->no_ijc = !m->chain;
+    e->no_ijc = !m->chain || (b->flags & HV_BLOCK_STEP);
     e->m = m;
     e->nogroup = nogroup;
     e->u_live = e->u_prev = 0;
@@ -1959,6 +1959,7 @@ static int translate_emit(HvMachine *m, HvBlock *b, const uint32_t *code, uint32
     /* No prologue: hv_enter, chained exits and the indirect-branch cache all
        enter with guest x0 and x1 live. */
     uint32_t max = avail < HV_MAX_BLOCK_INSNS ? avail : HV_MAX_BLOCK_INSNS;
+    if (b->flags & HV_BLOCK_STEP) max = 1; /* single-stepped: the dispatcher takes the step exception after it */
     plan_groups(e, code, max, b->va);
     uint32_t i = 0;
     int ended = 0;
@@ -2068,7 +2069,7 @@ int hv_translate_place(HvMachine *m, HvBlock *b) {
     for (uint32_t k = 0; k < e->nsite && !m->trace; k++) { /* tracing logs every block entry */
         uint32_t slot = e->site[k].slot;
         uint64_t t = e->site[k].target;
-        if (m->slot_xa[slot] || e->site[k].flags != b->flags || t == m->stop_pc || t == m->stop_pc2) continue; /* the dispatcher stops there */
+        if (m->slot_xa[slot] || e->site[k].flags != b->flags || (b->flags & HV_BLOCK_STEP) || t == m->stop_pc || t == m->stop_pc2) continue; /* the dispatcher stops there */
         const uint32_t *code = NULL;
         if (t == b->va) code = dst;
         else {

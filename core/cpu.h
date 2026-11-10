@@ -288,6 +288,7 @@ enum {
 #define HV_PSTATE_I      (1u << 7)
 #define HV_PSTATE_F      (1u << 6)
 #define HV_PSTATE_PAN    (1u << 22)
+#define HV_PSTATE_SS     (1u << 21) /* software step: active-not-pending (with MDSCR_EL1.SS, at EL0) */
 
 /* Which TLB table accesses at this EL use (EL0 for LDTR/STTR). */
 static inline int hv_tlb_table(const HvCpu *cpu, int el) {

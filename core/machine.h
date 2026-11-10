@@ -57,6 +57,7 @@ typedef struct HvBlock {
 #define HV_BLOCK_FPOFF 2u        /* CPACR_EL1.FPEN traps FP/SIMD at this EL */
 #define HV_BLOCK_SPX   4u        /* EL1 with SPSel = 1 (SP_EL1 in use, SP_EL0 banked) */
 #define HV_BLOCK_PAN   8u        /* EL1 with PSTATE.PAN set (selects TLB table 2) */
+#define HV_BLOCK_STEP  16u       /* EL0 being single-stepped (MDSCR_EL1.SS, PSTATE.SS): one instruction, linked to nothing */
 
 #define HV_MAX_RAM 8
 #define HV_MAX_MMIO 48

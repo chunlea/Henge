@@ -19,6 +19,7 @@
 #define HV_EC_DABT_LOWER  0x24
 #define HV_EC_DABT_SAME   0x25
 #define HV_EC_SP_ALIGN    0x26
+#define HV_EC_SOFTSTEP_LOWER 0x32
 #define HV_EC_BRK         0x3c
 
 enum { HV_EXC_SYNC = 0, HV_EXC_IRQ = 1, HV_EXC_FIQ = 2, HV_EXC_SERROR = 3 };

@@ -87,6 +87,7 @@ static uint32_t block_flags(HvCpu *cpu) {
     if (cpu->el && (cpu->pstate_extra & HV_PSTATE_PAN)) flags |= HV_BLOCK_PAN;
     uint32_t fpen = (cpu->cpacr_el1 >> 20) & 3;
     if (fpen == 0 || fpen == 2 || (fpen == 1 && cpu->el == 0)) flags |= HV_BLOCK_FPOFF;
+    if (!cpu->el && (cpu->mdscr_el1 & 1) && (cpu->pstate_extra & HV_PSTATE_SS)) flags |= HV_BLOCK_STEP;
     return flags;
 }
 
@@ -281,7 +282,7 @@ static void *fast_resume(HvCpu *cpu) {
     if (off < 0) off = getenv("HV_NO_FAST_RESUME") != NULL;
     HvMachine *m = cpu->m;
     HvPerCpu *p = cpu->pc_state;
-    if (off || !m->chain || m->trace || m->log >= 2 || !p || cpu->pc == m->stop_pc || cpu->pc == m->stop_pc2 || cpu->halted || cpu->off) { if (m->stats_interval) m->stats.fr_fail[0]++; return NULL; }
+    if (off || !m->chain || m->trace || m->log >= 2 || !p || (cpu->mdscr_el1 & 1) || cpu->pc == m->stop_pc || cpu->pc == m->stop_pc2 || cpu->halted || cpu->off) { if (m->stats_interval) m->stats.fr_fail[0]++; return NULL; }
     if (__atomic_load_n(&cpu->exit_req, __ATOMIC_RELAXED) || __atomic_load_n(&m->flush_pending, __ATOMIC_RELAXED) ||
         __atomic_load_n(&m->stw_active, __ATOMIC_RELAXED)) {
         if (m->stats_interval) m->stats.fr_fail[1]++;
@@ -976,6 +977,14 @@ static int run_loop(HvCpu *cpu, int one) {
             pending_chain = NULL;
             why = 3;
         }
+        /* Software step at EL0 (MDSCR_EL1.SS), active-pending: the stepped instruction is done, or the return to
+           EL0 came with SPSR.SS clear (after a stepped SVC). The step exception comes before anything else runs. */
+        if (!cpu->el && (cpu->mdscr_el1 & 1) && !(cpu->pstate_extra & HV_PSTATE_SS)) {
+            hv_take_exception(cpu, HV_EXC_SYNC, HV_EC_SOFTSTEP_LOWER << 26 | 1u << 25 | 1u << 24 | 0x22, 0, 0, cpu->pc);
+            pending_chain = NULL;
+            last_reason = HV_EXIT_EXCEPTION;
+            continue;
+        }
         if (cpu->pc == m->stop_pc || cpu->pc == m->stop_pc2) {
             if (!m->stop_hook) return HV_EXIT_HALT;
             m->stop_hook(cpu);
@@ -1033,7 +1042,7 @@ static int run_loop(HvCpu *cpu, int one) {
         /* Remember it for indirect branches (not the tests' stop PC: that must reach us). */
         /* EL0 tables only hold user VAs and EL1 tables kernel VAs, so each half has its own salt. */
         int kernel = b->flags & HV_BLOCK_EL1;
-        if (m->chain && b->va != m->stop_pc && b->va != m->stop_pc2 && (int)((b->va >> 55) & 1) == kernel) {
+        if (m->chain && !(b->flags & HV_BLOCK_STEP) && b->va != m->stop_pc && b->va != m->stop_pc2 && (int)((b->va >> 55) & 1) == kernel) {
             HvPerCpu *pcs = cpu->pc_state;
             uint64_t *t = pcs->ijc + (size_t)(b->flags & (HV_IJC_TABLES - 1)) * (HV_IJC_TABLE_BYTES / 8);
             uint64_t tag = b->va ^ cpu->ijc_salt[kernel];
@@ -1122,7 +1131,10 @@ static int run_loop(HvCpu *cpu, int one) {
             fprintf(stderr, "hengevm: cpu %u entering %p (rx+%llx, used %llx) for va %llx: block gen %u, now %u, maker %u\n", cpu->index, (void *)b->code, (unsigned long long)(b->code - m->jit.base) * 4, (unsigned long long)m->jit.used * 4, (unsigned long long)b->va, b->jit_gen, m->jit_gen, b->maker);
         hv_enter(cpu, b->code);
 
-        if (cpu->exit_reason == HV_EXIT_BRANCH && cpu->last_stub && m->chain) {
+        if (b->flags & HV_BLOCK_STEP) {
+            /* One instruction ran without an exception: the step is done (active-pending). */
+            if (!cpu->el && cpu->exit_reason != HV_EXIT_EXCEPTION && cpu->pc != b->va) cpu->pstate_extra &= ~HV_PSTATE_SS;
+        } else if (cpu->exit_reason == HV_EXIT_BRANCH && cpu->last_stub && m->chain) {
             pending_chain = (uint64_t *)cpu->last_stub;
             chain_pc = cpu->pc;
             chain_flags = block_flags(cpu); /* the exiting block's state (a block ends where its state changes) */

@@ -12,7 +12,7 @@
 /* Only EL0 and EL1 exist for the guest; HengeVM plays EL2 (PSCI over HVC, as
    QEMU's vmapple machine sets up) and there is no EL3. */
 
-#define PSTATE_EXTRA_MASK ((1ull << 22) | (1ull << 23) | (1ull << 12) | (1ull << 24) | (1ull << 25))
+#define PSTATE_EXTRA_MASK ((1ull << 22) | (1ull << 23) | (1ull << 12) | (1ull << 24) | (1ull << 25) | HV_PSTATE_SS)
 
 uint64_t hv_pstate_get(HvCpu *cpu) {
     return (cpu->nzcv & 0xf0000000) | (cpu->daif & HV_PSTATE_DAIF) | (cpu->pstate_extra & PSTATE_EXTRA_MASK) |
@@ -46,6 +46,8 @@ void hv_take_exception(HvCpu *cpu, int type, uint32_t esr, uint64_t far, int set
     if (type == HV_EXC_SYNC) cpu->m->stats.exceptions++;
     else cpu->m->stats.interrupts++;
     uint64_t spsr = hv_pstate_get(cpu);
+    /* A stepped SVC has completed: the return comes back active-pending (the step exception at once). */
+    if (type == HV_EXC_SYNC && (esr >> 26) == HV_EC_SVC64) spsr &= ~(uint64_t)HV_PSTATE_SS;
     {
         HvStats *st = &cpu->m->stats;
         uint32_t k = st->nelchg++ & 15;
@@ -66,6 +68,7 @@ void hv_take_exception(HvCpu *cpu, int type, uint32_t esr, uint64_t far, int set
     if (!((cpu->sctlr_el1 >> 23) & 1)) extra |= HV_PSTATE_PAN; /* SCTLR_EL1.SPAN == 0 */
     extra &= ~(1ull << 12);
     if ((cpu->sctlr_el1 >> 44) & 1) extra |= 1ull << 12;      /* SSBS from DSSBS */
+    extra &= ~(uint64_t)HV_PSTATE_SS;                          /* EL1 itself is never stepped (no KDE) */
     set_extra(cpu, extra);
     cpu->excl_addr = ~0ull;
     cpu->pc = (cpu->vbar_el1 & ~0x7ffull) + offset + (uint64_t)type * 0x80;
