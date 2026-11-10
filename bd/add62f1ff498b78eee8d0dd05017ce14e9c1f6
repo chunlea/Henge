@@ -1,0 +1,66 @@
+Makefile
+  h_44076b318daf9c 143-146
+core/cpu.h
+  h_44076b318daf9c 179-181
+core/dispatch.c
+  h_44076b318daf9c 101-102,114-117,685-687
+core/machine.c
+  h_44076b318daf9c 30,41,275
+core/machine.h
+  h_44076b318daf9c 80-81,341
+core/mmu.c
+  h_44076b318daf9c 180,182-199,821,1413
+core/mmu.h
+  h_44076b318daf9c 58-62
+core/sysreg.c
+  h_44076b318daf9c 214,217-221,225-226,228-234
+core/translate.c
+  h_44076b318daf9c 1975,1977-1980
+devices/virtio_gpu.c
+  h_44076b318daf9c 50,72,200,273
+devices/virtio_gpu.h
+  h_44076b318daf9c 30
+devices/virtio_gpu_priv.h
+  h_44076b318daf9c 58
+devices/virtio_gpu_virgl.c
+  h_44076b318daf9c 11-12,50-54,74-75,89-93,95-140,184-192,236-237,244-254,261-263,358-538,542,549-559,680,813,877-878,940-941,965
+devices/virtio_gpu_virgl.h
+  h_44076b318daf9c 14-17
+host/vm.c
+  h_44076b318daf9c 26,277-288,332-339,818-819
+host/vm.h
+  h_44076b318daf9c 69-81
+ios/Henge/BootDisplay.swift
+  h_44076b318daf9c 19-20,29-31,62,71,78-84,92
+ios/Henge/EngineTuning.swift
+  h_44076b318daf9c 31-33
+ios/Henge/Hardware.swift
+  h_44076b318daf9c 78-108,112-114,116-130,135,159-162,164,171-182,185,194,197-220
+ios/Henge/Input.swift
+  h_44076b318daf9c 67-69
+ios/Henge/LinuxScreen.swift
+  h_44076b318daf9c 1-117
+ios/Henge/LinuxShortcuts.swift
+  h_44076b318daf9c 1-159
+ios/Henge/Native/henge-vm.c
+  h_44076b318daf9c 416-434
+ios/Henge/Native/henge-vm.h
+  h_44076b318daf9c 116-122
+ios/Henge/SessionView.swift
+  h_44076b318daf9c 12-13,197,295-298,385-409,418,597-598
+ios/Henge/SettingsView.swift
+  h_44076b318daf9c 13-14,36-51,121-133
+tests/test_mmu.c
+  h_44076b318daf9c 546-585
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "bdadd62f1ff498b78eee8d0dd05017ce14e9c1f6",
+  "prompts": {},
+  "humans": {
+    "h_44076b318daf9c": {
+      "author": "chunli <git@chunli.dev>"
+    }
+  }
+}
