@@ -1,0 +1,41 @@
+devices/virtio_gpu.c
+  s_862d92eac8a50c::t_715e744f61670d 50,72,200,273
+devices/virtio_gpu.h
+  s_862d92eac8a50c::t_9ddd98e4495408 30
+devices/virtio_gpu_priv.h
+  s_862d92eac8a50c::t_041ad65ce11691 58
+devices/virtio_gpu_virgl.c
+  s_862d92eac8a50c::t_fa5c0e437ac13f 11-12,50-54,74-75,89-93,95-138,182-190,234-235,242-251,258-260,355-467,471,478-488,609,742,806-807,869-870,894
+devices/virtio_gpu_virgl.h
+  s_862d92eac8a50c::t_9a3351c32b1178 14-17
+host/vm.c
+  s_862d92eac8a50c::t_e2b619e124d157 25,263-274
+host/vm.h
+  s_862d92eac8a50c::t_8a78800ee7bad7 65-77
+ios/Henge/BootDisplay.swift
+  s_862d92eac8a50c::t_01db6cdbe078d1 17-18,27-29,60,69,76-81,89
+ios/Henge/EngineTuning.swift
+  s_862d92eac8a50c::t_1e9542c187d5f0 31-32
+ios/Henge/LinuxScreen.swift
+  s_862d92eac8a50c::t_dc310e405122c0 1-116
+ios/Henge/Native/henge-vm.c
+  s_862d92eac8a50c::t_e4b0390fd01ccb 377-395
+ios/Henge/Native/henge-vm.h
+  s_862d92eac8a50c::t_8bc2d8ea469b15 109-115
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "c979c1dff0c52dbe4099f23edb801eab75407e70",
+  "prompts": {},
+  "sessions": {
+    "s_862d92eac8a50c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2a2ea67b-10a4-470a-aa9f-ca4aec62a749",
+        "model": "unknown"
+      },
+      "human_author": "chunli <git@chunli.dev>"
+    }
+  }
+}
