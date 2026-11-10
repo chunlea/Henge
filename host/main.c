@@ -46,6 +46,7 @@ typedef struct RunArgs {
     const char *dump_path;
 } RunArgs;
 static RunArgs run_args;
+static void fb_shot_write(const char *path);
 static uint64_t translate_va;
 
 /* Chained blocks run without returning to the dispatcher; this makes them leave
@@ -867,6 +868,11 @@ static void *cpu_thread(void *unused) {
                     (unsigned long long)pa, fsc);
         }
     }
+    if (getenv("HV_FB_SHOT")) {
+        char last[1024];
+        snprintf(last, sizeof last, "%s.stop.png", getenv("HV_FB_SHOT"));
+        fb_shot_write(last);
+    }
     if (getenv("HV_BUGCHECK")) {
         /* Debugging a Windows guest: HV_BUGCHECK=CODE (as on the blue screen's list, 0x13a say) looks through guest
            memory for the kernel's record of the stop, the code and its four parameters as five 64-bit words. */
@@ -965,13 +971,12 @@ static void install_progress(int step, double p, void *user) {
     else fprintf(stderr, "hengevm: install: step %d %d%%\n", step, pct);
 }
 
-/* HV_FB_SHOT=PNG (Linux guests): the framebuffer, written every 5 s. */
-static void *fb_shot_thread(void *arg) {
-    const char *path = arg;
-    for (;;) {
-        sleep(5);
+/* HV_FB_SHOT=PNG (Linux and UEFI guests): the framebuffer, written every 5 s, and once more as PNG.stop.png
+   when the machine stops (what a guest that restarted by itself had on its screen: a Windows stop code). */
+static void fb_shot_write(const char *path) {
+    {
         HvBootDisplay d;
-        if (hv_vm_boot_display(&d) != 0) continue;
+        if (hv_vm_boot_display(&d) != 0) return;
         CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
         CGContextRef ctx = CGBitmapContextCreate((void *)d.pixels, d.width, d.height, 8, d.stride, cs,
                                                  kCGImageAlphaNoneSkipFirst | kCGBitmapByteOrder32Little);
@@ -987,6 +992,13 @@ static void *fb_shot_thread(void *arg) {
         if (img) CGImageRelease(img);
         if (ctx) CGContextRelease(ctx);
         CGColorSpaceRelease(cs);
+    }
+}
+
+static void *fb_shot_thread(void *arg) {
+    for (;;) {
+        sleep(5);
+        fb_shot_write(arg);
     }
     return NULL;
 }
