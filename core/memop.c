@@ -158,6 +158,9 @@ int hv_mem_decode(uint32_t insn, HvMemOp *op) {
         op->imm = sext((insn >> 12) & 0x1ff, 9);
         op->size = size;
         op->rm = 31;
+        /* Off its natural alignment it is the helper's: the host's CPU refuses one that crosses a 16-byte
+           boundary (a bus error here), and Windows' x86 emulator loads and stores everything this way. */
+        op->align = 1;
         op->bytes = 1u << size;
         op->store = opc == 0;
         op->load = opc != 0;
@@ -693,9 +696,11 @@ int hv_mem_emulate(HvCpu *cpu, uint32_t insn, uint64_t pc) {
         rc = do_vector(cpu, &op, va, el, pc);
         break;
     default: {
-        /* LDAR and STLR off their natural alignment: allowed as on the host's CPU (FEAT_LSE2), unless SCTLR_EL1.A
-           asks for the check or the access crosses a 16-byte boundary. */
-        if (op.align && (va & (op.bytes - 1)) && ((cpu->sctlr_el1 >> 1 & 1) || (va & 15) + op.bytes > 16))
+        /* LDAR, STLR and the RCpc forms off their natural alignment: allowed as on the host's CPU (FEAT_LSE2),
+           unless SCTLR_EL1.A asks for the check, or the access crosses a 16-byte boundary and SCTLR_EL1.nAA
+           does not let that pass (Windows sets it). */
+        if (op.align && (va & (op.bytes - 1)) &&
+            ((cpu->sctlr_el1 >> 1 & 1) || ((va & 15) + op.bytes > 16 && !(cpu->sctlr_el1 >> 6 & 1))))
             return alignment_fault(cpu, va, op.store, pc);
         int pair = op.kind == HV_MEM_PAIR;
         uint32_t esize = 1u << op.size;
