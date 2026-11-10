@@ -1,0 +1,31 @@
+devices/virt.c
+  s_be58c8822e297c::t_38e0132569db6a 89-95
+devices/vmapple.h
+  s_be58c8822e297c::t_911ec419340f0c 69
+devices/xhci.c
+  s_be58c8822e297c::t_216523b65d37c6 174-203,218,434-440,459-486,821-907,1107,1277,1340,1731,1738-1744,1762-1763
+devices/xhci.h
+  s_be58c8822e297c::t_4fd6b96230bf2c 23-24,116-125,129-134
+host/net_slirp.c
+  s_be58c8822e297c::t_9ded2e2cc62407 51-53,275,284-287,289-292,332-333,348-349
+host/net_slirp.h
+  s_be58c8822e297c::t_c5d6592b614b0e 11-15
+host/vm.c
+  s_be58c8822e297c::t_7c86532a34e808 166-169,363-365
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "c84ca3ecc356166e4ff1f547e0d99b089bb7e128",
+  "prompts": {},
+  "sessions": {
+    "s_be58c8822e297c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "460830a0-c917-44aa-9aea-92d45fd794ef",
+        "model": "unknown"
+      },
+      "human_author": "chunli <git@chunli.dev>"
+    }
+  }
+}
