@@ -879,14 +879,26 @@ static void *cpu_thread(void *unused) {
         fb_shot_write(last);
     }
     if (getenv("HV_BUGCHECK")) {
-        /* Debugging a Windows guest: HV_BUGCHECK=CODE (as on the blue screen's list, 0x13a say) looks through guest
-           memory for the kernel's record of the stop, the code and its four parameters as five 64-bit words. */
-        uint64_t code = strtoull(getenv("HV_BUGCHECK"), NULL, 0);
+        /* Debugging a Windows guest: HV_BUGCHECK=CODE (as on the blue screen's list, 0x13a say; or "all" for the usual
+           ones) looks through guest memory for the kernel's record of the stop, the code and its four parameters as
+           five 64-bit words. */
+        static const uint64_t usual[] = {0x0a, 0x18, 0x19, 0x1a, 0x1e, 0x24, 0x3b, 0x4e, 0x50, 0x7a, 0x7e, 0x7f, 0x8e, 0x9f, 0xbe, 0xc2, 0xc4, 0xc5,
+                                         0xd1, 0xef, 0xf7, 0xfc, 0x101, 0x109, 0x10e, 0x119, 0x133, 0x139, 0x13a, 0x154, 0x15d, 0x162, 0x18b, 0x1c7};
+        const char *want = getenv("HV_BUGCHECK");
+        int all = !strcmp(want, "all");
+        uint64_t one = strtoull(want, NULL, 0);
         const uint64_t *q = (const uint64_t *)(const void *)board.ram;
         int shown = 0;
         for (uint64_t i = 0; i + 5 <= board.ram_size / 8 && shown < 12; i++) {
-            if (q[i] != code || (!q[i + 1] && !q[i + 2] && !q[i + 3] && !q[i + 4])) continue;
-            if (q[i + 2] >> 44 != 0xfffff && q[i + 3] >> 44 != 0xfffff && q[i + 1] >> 44 != 0xfffff) continue; /* a kernel address among them */
+            uint64_t code = q[i];
+            if (code == 0 || code > 0x1ff) continue;
+            int match = !all && code == one;
+            for (unsigned k = 0; all && !match && k < sizeof usual / sizeof usual[0]; k++) match = code == usual[k];
+            if (!match || (!q[i + 1] && !q[i + 2] && !q[i + 3] && !q[i + 4])) continue;
+            /* a kernel address among the parameters, and (for "all") the record as KiBugCheckData has it: the same five
+               words again nowhere near, so only take ones whose parameters are not small counters */
+            int kernel = (q[i + 1] >> 44 == 0xfffff) + (q[i + 2] >> 44 == 0xfffff) + (q[i + 3] >> 44 == 0xfffff) + (q[i + 4] >> 44 == 0xfffff);
+            if (kernel < (all ? 2 : 1)) continue;
             fprintf(stderr, "hengevm: stop %llx at pa %llx: %llx %llx %llx %llx\n", (unsigned long long)code,
                     (unsigned long long)(board.mem_base + i * 8), (unsigned long long)q[i + 1], (unsigned long long)q[i + 2],
                     (unsigned long long)q[i + 3], (unsigned long long)q[i + 4]);
