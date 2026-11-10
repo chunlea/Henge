@@ -77,6 +77,21 @@ Windows switches both `TTBR0_EL1` and `TTBR1_EL1` for each process, with the add
 space ID in `TTBR1` (`TCR_EL1.A1`). The engine empties its TLB on each such switch,
 which is right and slow. It is the first thing to look at for speed.
 
+## The display's size
+
+Windows has no driver for a display here: it draws in the framebuffer the firmware's Graphics Output
+Protocol gave its boot manager, and offers in its Settings that framebuffer's size and smaller ones
+(which it stretches). The firmware's driver, QemuRamfbDxe, has a table of three sizes, 640x480 to
+1024x768, and the boot manager keeps the one the firmware was using, 800x600.
+
+So the table is rewritten (`ramfb_sizes` in `devices/virt.c`): `--screen 1440x1000`, or the machine's
+screen in the iOS app, becomes every entry of it. The driver looks for `etc/ramfb` in fw_cfg's
+directory as it starts, before it reads its table to size the framebuffer, and that is when the
+table is found in the guest's memory (the driver's image, loaded near the top of RAM) and changed.
+The firmware's file is as QEMU ships it. A Windows installed at one size keeps it until the new one
+is chosen in Settings, System, Display; the pointer is only where the finger says when Windows
+fills the framebuffer.
+
 ## Running it
 
 ```
@@ -137,11 +152,9 @@ its Details type what Setup needs: the LabConfig settings above, and `oobe\bypas
 ## Not there yet
 
 - No sound, no clipboard or shared folder.
-- No display driver, so Windows draws with the CPU in the framebuffer its boot manager chose and
-  its Settings cannot change the size. The firmware offers 640x480, 800x600 and 1024x768, and the
-  boot manager takes 800x600 unless told `bcdedit /set {globalsettings} highestmode on` (from an
-  administrator's prompt; the iOS session's Details type it). More than that needs a display
-  driver: virtio-win's viogpudo, on a virtio-gpu device, is the one to try.
+- No display driver: Windows draws with the CPU, and the screen's size is fixed for a run (below).
+  A size that follows the window, and drawing by the GPU, need a driver: virtio-win's viogpudo, on
+  a virtio-gpu device, is the one to try.
 - A restart ends `hengevm`: it has to be started again (a shell loop does). The
   firmware then starts Windows Boot Manager from the disk, whose entry Windows wrote to
   the firmware's variables.

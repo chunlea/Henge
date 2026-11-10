@@ -1027,6 +1027,7 @@ int main(int argc, char **argv) {
     const char *linux_kernel = NULL, *linux_initrd = NULL, *linux_cmdline = NULL, *linux_extra = NULL;
     int linux_from_disk = 0;
     const char *uefi_code = NULL, *uefi_vars = NULL, *cdrom = NULL;
+    unsigned screen_w = 0, screen_h = 0;
     uint64_t seed = 0, ecid = 0, ram_mb = 4096, aux_offset = 16384;
     const char *install_ipsw = NULL;
     const char *share_folder = NULL;
@@ -1082,6 +1083,7 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--log")) log = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--trace")) trace = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--screenshot")) screenshot = argv[++i];
+        else if (!strcmp(argv[i], "--screen")) sscanf(argv[++i], "%ux%u", &screen_w, &screen_h); /* WxH: a UEFI guest's display */
         else if (!strcmp(argv[i], "--watch")) watch = strtoull(argv[++i], NULL, 0);
         else if (!strcmp(argv[i], "--stats")) stats = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--profile")) profile = atoi(argv[++i]);
@@ -1111,6 +1113,7 @@ int main(int argc, char **argv) {
                      .linux_kernel = linux_kernel, .linux_initrd = linux_initrd, .linux_cmdline = linux_cmdline,
                      .linux_from_disk = linux_from_disk, .linux_extra = linux_extra,
                      .uefi_code = uefi_code, .uefi_vars = uefi_vars, .cdrom = cdrom};
+    if (uefi_code && screen_w && screen_h) vc.fb_width = screen_w, vc.fb_height = screen_h;
     if (getenv("HV_JIT_MB")) vc.jit_bytes = (size_t)atoi(getenv("HV_JIT_MB")) << 20; /* debugging: a small region flushes often */
     hv_prof_register = hv_prof_register_thread;
     char err[256];

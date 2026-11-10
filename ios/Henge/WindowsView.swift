@@ -430,11 +430,23 @@ struct WindowsSettingsView: View {
                     .deskCard()
 
                 DeskHeading("Screen")
-                Text("\(machine.screen.width) × \(machine.screen.height), drawn by Windows with the emulated CPUs: it has no display driver for this machine, and keeps the screen the firmware gave it.")
-                    .font(.system(size: 14)).foregroundStyle(Desk.dim)
-                    .padding(17)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .deskCard()
+                VStack(alignment: .leading, spacing: 10) {
+                    Picker("Size", selection: Binding(get: { machine.screen.width }, set: { width in
+                        (machine.screenWidth, machine.screenHeight) = Device.windowsScreen(width: width)
+                        machines.update(machine)
+                    })) {
+                        ForEach(Device.windowsWidths, id: \.self) { width in
+                            let size = Device.windowsScreen(width: width)
+                            Text("\(size.width) × \(size.height)").tag(width)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    Text("The shape of this \(Device.name)'s screen, from the next start. Windows draws with the emulated CPUs (it has no display driver for this machine), so a larger screen is slower. This is the largest size Windows offers: a Windows installed at another size keeps it until this one is chosen in its Settings, System, Display.")
+                        .font(.system(size: 13)).foregroundStyle(Desk.dim)
+                }
+                .padding(17)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .deskCard()
 
                 if mediaBytes > 0 {
                     DeskHeading("Installation disc")

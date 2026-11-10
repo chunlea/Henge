@@ -45,6 +45,7 @@ typedef struct HvVirtParams {
     HvDisk *cdrom;           /* a second, read-only disk: installation media (NULL: none) */
     const uint8_t *mac;      /* NULL: no network card */
     const char *vars_path;   /* where the firmware's variables are kept (NULL: nowhere) */
+    uint32_t screen_width, screen_height; /* the display's size; 0: the firmware's own choice (800 x 600) */
 } HvVirtParams;
 
 int hv_virt_create(HvVmapple *b, HvMachine *m, HvCpu *cpus, const HvVirtParams *p);

@@ -326,6 +326,13 @@ final class Machines: ObservableObject {
             return
         }
         all = list.filter { FileManager.default.fileExists(atPath: $0.disk.path) }
+        // Windows machines made when the firmware's 800 x 600 was the only size get the device's.
+        var changed = false
+        for i in all.indices where all[i].isWindows && all[i].screenWidth == 800 {
+            (all[i].screenWidth, all[i].screenHeight) = Device.windowsScreen
+            changed = true
+        }
+        if changed { save() }
     }
 
     private func save() {

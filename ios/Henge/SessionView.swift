@@ -568,7 +568,7 @@ struct SessionView: View {
                             await WindowsSetup.typeHere(WindowsSetup.largerScreen)
                         }
                     }
-                    Text("Windows has no display driver for this machine, so its Settings cannot change the screen's size: it keeps the one its boot manager chose, 800 × 600 unless told otherwise. In Windows, open Terminal or Command Prompt as administrator, tap this, and restart Windows: the screen is 1024 × 768 from then on, the largest the firmware offers.")
+                    Text("Only for a screen that stays at 800 × 600 whatever is chosen: the machine's screen (its settings, on the Windows tab) is the largest size Windows offers in Settings, System, Display, and choosing it there is all it takes. If Windows offers nothing larger, open Terminal or Command Prompt as administrator, tap this, and restart Windows.")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
                 }
@@ -683,7 +683,7 @@ struct SessionView: View {
                 return
             }
             rc = henge_vm_boot_uefi(firmware, mac.vars.path, mac.disk.path, media ? mac.media.path : nil, ram, Int32(cpus),
-                                    &buffer, buffer.count)
+                                    UInt32(mac.screen.width), UInt32(mac.screen.height), &buffer, buffer.count)
         } else if mac.isLinux {
             // The disk's own boot entry (host/linux_disk.c). Under emulation udev takes minutes over its first
             // pass, longer than systemd's 90 s wait for a disk: that would drop Omarchy into its emergency shell.

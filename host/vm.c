@@ -352,7 +352,8 @@ int hv_vm_create(const HvVmConfig *c, char *err, size_t errlen) {
     static const uint8_t mac[6] = {0x02, 0x48, 0x56, 0x4d, 0x00, 0x01};
     if (uefi) {
         HvVirtParams vp = {.ncpus = ncpus, .ram_size = (c->ram_mb ? c->ram_mb : 4096) << 20, .disk = have_disk ? &disk : NULL,
-                           .cdrom = c->cdrom ? &aux : NULL, .mac = mac, .vars_path = c->uefi_vars};
+                           .cdrom = c->cdrom ? &aux : NULL, .mac = mac, .vars_path = c->uefi_vars,
+                           .screen_width = c->fb_width, .screen_height = c->fb_height};
         if (hv_virt_create(&board, &m, cpus, &vp) != 0)
             return fail(err, errlen, "Cannot build the machine (not enough memory for the guest's RAM?).");
         HvUefiBoot ub = {.code = c->uefi_code, .dtb_out = getenv("HV_DTB_OUT")};
