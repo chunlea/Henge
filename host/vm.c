@@ -318,7 +318,9 @@ int hv_vm_linux_cursor(HvLinuxCursor *c) {
     return 0;
 }
 
-uint64_t hv_vm_display_changes(void) { return board.gpu ? board.gpu->changes + 1 : 0; }
+/* A UEFI guest's GPU counts changes only once its driver has the display: until then the picture is the
+   firmware's framebuffer, which says nothing when it changes (0: look every time). */
+uint64_t hv_vm_display_changes(void) { return board.gpu && (!board.fwcfg || board.gpu->enabled) ? board.gpu->changes + 1 : 0; }
 
 uint64_t hv_vm_gpu_frames(void) {
     HvPvgLite *pvg = atomic_load_explicit(&display_pvg, memory_order_acquire);
