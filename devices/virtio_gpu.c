@@ -304,6 +304,19 @@ HvVirtioGpu *hv_virtio_gpu_create_d3d(HvMachine *m, HvPcie *bus, uint32_t width,
     return g;
 }
 
+void hv_virtio_gpu_want_size(HvVirtioGpu *g, uint32_t width, uint32_t height) {
+    if (!g || !g->d3d) return;
+    width = (width < 640 ? 640 : width > GPU_MAX_W ? GPU_MAX_W : width) & ~7u;
+    height = (height < 480 ? 480 : height > GPU_MAX_H ? GPU_MAX_H : height) & ~7u;
+    if (width == g->want_w && height == g->want_h) return;
+    g->want_w = width, g->want_h = height;
+    uint32_t events;
+    memcpy(&events, g->vio.config, 4);
+    events |= 1; /* VIRTIO_GPU_EVENT_DISPLAY */
+    memcpy(g->vio.config, &events, 4);
+    if (g->vio.status & 4) hv_virtio_config_changed(&g->vio);
+}
+
 void hv_virtio_gpu_poll(HvVirtioGpu *g) {
     if (g) hv_gpu_virgl_poll(g->virgl);
 }

@@ -77,6 +77,24 @@ size_t hv_vm_serial_input(const uint8_t *buf, size_t len) {
     return n;
 }
 
+void hv_vm_display_wanted(uint32_t width, uint32_t height) {
+    if (!board.fwcfg || !board.gpu) return;
+    hv_dev_lock(&m);
+    hv_virtio_gpu_want_size(board.gpu, width, height);
+    hv_dev_unlock(&m);
+    hv_machine_wake(&m);
+}
+
+int hv_vm_display_size(uint32_t *width, uint32_t *height) {
+    if (board.fwcfg && board.gpu && board.gpu->enabled) {
+        *width = board.gpu->width, *height = board.gpu->height;
+        return 0;
+    }
+    if (!board.fb_size) return -1;
+    *width = board.fb_width, *height = board.fb_height;
+    return 0;
+}
+
 int hv_vm_gpu_driver_active(void) { return board.fwcfg && board.gpu && board.gpu->d3d && board.gpu->enabled; }
 
 int hv_vm_boot_display(HvBootDisplay *d) {

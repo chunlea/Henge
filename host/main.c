@@ -548,6 +548,7 @@ static void *input_thread(void *unused) {
         int x, y;
         if (sscanf(line, "click %d %d", &x, &y) == 2) pointer_to(x, y), click_here();
         else if (sscanf(line, "move %d %d", &x, &y) == 2) pointer_to(x, y);
+        else if (sscanf(line, "resize %d %d", &x, &y) == 2) hv_vm_display_wanted((uint32_t)x, (uint32_t)y); /* a UEFI guest's GPU display */
         else if (sscanf(line, "rclick %d %d", &x, &y) == 2) { /* the right button, as the host UI presses it */
             pointer_to(x, y);
             hv_vm_mouse_button(1, 1);

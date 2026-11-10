@@ -53,3 +53,14 @@ int hv_metal_texture_read(void *texture, uint32_t *out, uint32_t max_w, uint32_t
         return 0;
     }
 }
+
+/* The IOSurface behind the texture, retained (the caller releases it), or NULL if it has none: what a layer can
+   show as it is, with nothing copied. */
+IOSurfaceRef hv_metal_texture_surface(void *texture) {
+    @autoreleasepool {
+        id<MTLTexture> t = (__bridge id<MTLTexture>)texture;
+        IOSurfaceRef s = t ? t.iosurface : NULL;
+        if (s) CFRetain(s);
+        return s;
+    }
+}

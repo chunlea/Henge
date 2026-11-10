@@ -23,6 +23,11 @@ int henge_vm_boot_linux(const char *disk, uint64_t ram_mb, int cpus, uint32_t wi
    the driver starts. 0, or -1 with a reason in err. */
 int henge_vm_boot_uefi(const char *firmware, const char *vars, const char *disk, const char *cdrom, uint64_t ram_mb,
                        int cpus, uint32_t width, uint32_t height, const char *gpu, int gpu_only, char *err, size_t errlen);
+/* The size the host would like the running Windows machine's GPU display to be (the session's shape changed):
+   Windows follows, when the driver's helper service runs in it. */
+void henge_vm_display_wanted(uint32_t width, uint32_t height);
+/* The size of the picture the machine shows now. 0, or -1 before there is one. */
+int henge_vm_display_size(uint32_t *width, uint32_t *height);
 /* The running Windows machine's GPU driver has the display. */
 int henge_vm_gpu_driver_active(void);
 /* Unpacks a gzip file (the firmware as the app carries it). 0 or -1. */

@@ -50,6 +50,10 @@ void hv_vm_set_display_layer(void *layer);
 uint64_t hv_vm_gpu_frames(void);
 int hv_vm_ncpus(void);
 int hv_vm_is_linux(void);
+/* Any thread: the size the host would like a UEFI guest's GPU display to be (its window changed shape). */
+void hv_vm_display_wanted(uint32_t width, uint32_t height);
+/* The size of the picture hv_vm_boot_display gives now. 0, or -1 before there is one. */
+int hv_vm_display_size(uint32_t *width, uint32_t *height);
 /* A UEFI guest's GPU driver has the display (a guest with the driver installed needs no firmware framebuffer). */
 int hv_vm_gpu_driver_active(void);
 /* The serial port (PL011): what the guest writes goes to out (on a CPU thread; NULL: stdout),

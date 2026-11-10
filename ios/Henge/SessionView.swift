@@ -47,6 +47,11 @@ struct SessionView: View {
     @State private var map: UIImage?
     @State private var zoomFollowing: Task<Void, Never>?
     @State private var helperRunning = false
+    /// A Windows machine with its GPU driver: the session's size in points, the display size last asked of
+    /// Windows for it, and the shape of the picture Windows shows.
+    @State private var area = CGSize.zero
+    @State private var wanted = CGSize.zero
+    @State private var guestAspect: CGFloat?
     @State private var shown = CGSize(width: 0.5, height: 0.5) // how much of the Mac's screen the zoomed view shows
     @Environment(\.scenePhase) private var scenePhase
 
@@ -57,8 +62,9 @@ struct SessionView: View {
             let full = CGSize(width: geo.size.width + insets.leading + insets.trailing,
                               height: geo.size.height + insets.top + insets.bottom)
             let landscape = full.width > full.height
-            let layout = Layout(full: full, insets: insets, landscape: landscape, zoomed: zoomed, typing: typing, centre: zoomCentre, aspect: mac.aspect)
+            let layout = Layout(full: full, insets: insets, landscape: landscape, zoomed: zoomed, typing: typing, centre: zoomCentre, aspect: guestAspect ?? mac.aspect)
             ZStack(alignment: .topLeading) {
+                Color.clear.onAppear { area = full }.onChange(of: full) { area = $0 }
                 (landscape || zoomed ? Color.black : Desk.page)
                 // One view in every layout: it holds the layer the engine draws into.
                 BootDisplay(display: display, role: .device, logo: mac.isWindows ? "pc" : "apple.logo")
@@ -661,6 +667,8 @@ struct SessionView: View {
         zoomCentre = CGPoint(x: 0.5, y: 0.5)
         map = nil
         showWallpaperTip = false
+        wanted = .zero
+        guestAspect = nil
         while henge_vm_state() == 3 && !Task.isCancelled {
             try? await Task.sleep(nanoseconds: 100_000_000)
         }
@@ -769,6 +777,22 @@ struct SessionView: View {
             // A disc started by the firmware asks for a key ("Press any key to boot from CD or DVD") and gives up
             // after a few seconds. The firmware only gets to the disc when the disk has nothing to start.
             if media && tick < 40 { Keys.press(28) }
+            if mac.isWindows {
+                // The picture's shape, whatever size Windows is at; and with the GPU driver, the size this session
+                // would like: the machine's width, in the shape of the room there is for it.
+                var gw: UInt32 = 0, gh: UInt32 = 0
+                if henge_vm_display_size(&gw, &gh) == 0, gw > 0, gh > 0 { guestAspect = CGFloat(gw) / CGFloat(gh) }
+                if henge_vm_gpu_driver_active() != 0, area.width > 0, area.height > 0 {
+                    let room = area.width > area.height ? area : CGSize(width: area.width, height: area.width * 3 / 4)
+                    let width = CGFloat(mac.screen.width)
+                    let want = CGSize(width: width, height: (width * room.height / room.width / 8).rounded() * 8)
+                    if want != wanted {
+                        wanted = want
+                        henge_vm_display_wanted(UInt32(want.width), UInt32(want.height))
+                        HengeLog.log("session", "asking Windows for a \(Int(want.width))x\(Int(want.height)) screen")
+                    }
+                }
+            }
             if mac.isWindows && tick % 5 == 0 && henge_vm_gpu_driver_active() != 0,
                var seen = Machines.shared.all.first(where: { $0.id == mac.id }), seen.gpuDriver != true {
                 seen.gpuDriver = true

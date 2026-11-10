@@ -46,6 +46,10 @@ HvVirtioGpu *hv_virtio_gpu_create(HvMachine *m, HvPcie *bus, uint32_t width, uin
    GPU_MAX_W x GPU_MAX_H; width x height is what it is offered first), so the device has its own display buffer.
    dir: the folder of frameworks (virglrenderer, ANGLE, dxmt-native). NULL if 3D cannot start. */
 HvVirtioGpu *hv_virtio_gpu_create_d3d(HvMachine *m, HvPcie *bus, uint32_t width, uint32_t height, const char *dir);
+/* Device lock held: the host would like a Direct3D device's display to be this size. The driver is told its
+   display changed and asks again what it is like (display info, EDID); UTM's driver then has Windows change
+   to that size, when its helper service (vgpusrv) runs in the guest. */
+void hv_virtio_gpu_want_size(HvVirtioGpu *g, uint32_t width, uint32_t height);
 /* The display with the cursor drawn on it, into out (width * height). */
 void hv_virtio_gpu_compose(HvVirtioGpu *g, uint32_t *out);
 /* CPU 0, device lock held: 3D requests that have finished go back to the guest. */
