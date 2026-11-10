@@ -21,7 +21,8 @@ import UIKit
 ///   balloon MB         ask the Mac for that much of its memory back (HV_BALLOON set), log what it gave
 ///   snap [NAME]        the Mac's screen (1920x1080) into Documents/NAME.jpg (snap.jpg)
 ///   linux-install [NAME]  install Omarchy (LinuxInstaller) as a new Linux machine, and wait until it is done
-///   tab NAME           show a tab: macs, linux, install, settings
+///   windows-import FILE  bring in a Windows disk (raw, or .hvsparse) from Documents as a new machine, and wait
+///   tab NAME           show a tab: macs, linux, windows, install, settings
 ///   serial TEXT        written to a running Linux machine's serial console, with a newline
 ///   log TEXT           a marker in henge.log
 ///   stop               stop the Mac
@@ -153,6 +154,16 @@ enum Autopilot {
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
             }
             HengeLog.log("autopilot", "linux-install: \(installer.phase)")
+        case "windows-import":
+            let installer = WindowsInstaller.shared
+            installer.importDisk(docs.appendingPathComponent(arg), ramMB: min(max(Device.suggestedRAMGB, 2), 4) * 1024)
+            var tick = 0
+            while installer.busy {
+                if tick % 15 == 0 { HengeLog.log("autopilot", "windows-import: \(Int(installer.copied * 100))%") }
+                tick += 1
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+            }
+            HengeLog.log("autopilot", "windows-import: \(installer.failure ?? "done")")
         case "tab":
             NotificationCenter.default.post(name: Autopilot.showTab, object: arg.lowercased())
         case "serial":
