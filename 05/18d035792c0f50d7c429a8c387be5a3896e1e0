@@ -1,0 +1,171 @@
+ios/Henge/Native/henge-vm.c
+  s_8bb1fc5a5ea22b::t_97d966f9cd6f44 8,10-11,29-35,38-39,41-54,56-92,98,102,108,110,116,120,127,129,172,176,181,184,187,189,207-247,250-258,267-284,286,289-291,294-299,312-331,333,336-363,366-367,371-374,377-382,385,387-401,403,405,407-409
+ios/Henge/Native/henge-vm.h
+  s_8c78c10c465712::t_8052779e6e6e3c 39-41,43-46,48-54,87-92,99-100,108
+.github/workflows/build-henge.yml
+  s_8bb1fc5a5ea22b::t_d574132c22ddbb 16
+CHANGELOG.md
+  s_8bb1fc5a5ea22b::t_e39ffe82e8babf 7-27,75
+Makefile
+  s_8bb1fc5a5ea22b::t_77b75adf0db6ac 15,49,101-117
+README.md
+  s_8bb1fc5a5ea22b::t_96699fa2080c25 29,39,45
+core/cpu.h
+  s_8bb1fc5a5ea22b::t_bb57aae856957a 9-12,176
+core/dispatch.c
+  s_8bb1fc5a5ea22b::t_6db3360f8d85e0 41,157-161,339-340,342,672-682,789-791,798,812,863,876,892
+core/exception.c
+  s_8bb1fc5a5ea22b::t_01d8b0eb06edc0 148-151,167-170,177-180
+core/machine.c
+  s_8bb1fc5a5ea22b::t_1fa56d9271a56e 3,6,36-39,69-84,124-125,254-255,259-274,290,293-294,296-298,358-373,385-387,391-392,395-404,412-421,441-442,487-490,499,501
+core/machine.h
+  s_8bb1fc5a5ea22b::t_f5f83d14d010aa 27-30,77-80,208-209,220,225,270-271,273,369-371
+core/sysreg.c
+  s_8bb1fc5a5ea22b::t_5ac6d24c8f2202 398-401,420
+core/translate.c
+  s_8bb1fc5a5ea22b::t_1a3e0fc2b42d87 2097
+devices/pvg_colorprobe.h
+  s_8bb1fc5a5ea22b::t_e19ceb8103cf48 613
+devices/pvg_lite.c
+  s_8bb1fc5a5ea22b::t_68020ef41f3eb8 38-52,83,359-361,363-371,374-375,523-535,560,562-564,566,568,612,781-787
+devices/pvg_lite.h
+  s_8bb1fc5a5ea22b::t_04d5c56542f2df 15,24,34-35,52-55
+devices/pvg_metal.m
+  s_8bb1fc5a5ea22b::t_920c3c7fb2cd7c 84-86,144-145,154,211-245,549,741,748-751,755-759,766-771,906-1012,1024-1025,1027-1028,1067-1068,1074,1086-1103,1115-1116,1293-1330,1332-1346,1796,1823-1828,1848-1849,2021,2029,2054,2335,2364,2375-2376,2546,2566,2577-2580,2639,2672-2713,2725-2738,2754-2757
+devices/virtio_blk.c
+  s_8bb1fc5a5ea22b::t_4115ee1209716f 121-127,200-219,246,256-261
+devices/virtio_blk.h
+  s_8bb1fc5a5ea22b::t_1d95e0697cd5ef 45,53-55
+devices/vmapple.c
+  s_8bb1fc5a5ea22b::t_6c6dd0898a490f 57,125-126,128,281,304,323,358-392
+devices/vmapple.h
+  s_8bb1fc5a5ea22b::t_c8adcca0704417 78-80,97-98
+devices/xhci.c
+  s_8bb1fc5a5ea22b::t_8f1a7676f0745f 6,27,46,48,50,52,59,65,68,72-139,255-317,321-322,326-333,336,339-340,345-346,356-357,366,369,374-406,411-416,418-419,427,429,440,446,460-472,487-493,497-537,548-550,559-561,575,578,584,622-626,640-643,668,671,678-679,684,687,703-704,706-709,748-764,791-792,820,850-851,916,919-922,927,929,934-935,994-1124,1126-1128
+devices/xhci.h
+  s_8bb1fc5a5ea22b::t_ddf4293dd93589 9-14,16-17,22-29,52,54-59,66-85,93-104
+docs/architecture.md
+  s_8bb1fc5a5ea22b::t_c72fbed473b0ca 8-10,62-73
+docs/guest-shutdown.md
+  s_8bb1fc5a5ea22b::t_f1a7fa3e6cbab6 1-73
+host/audio_mac.c
+  s_8bb1fc5a5ea22b::t_6e15013f4eb765 78-88
+host/audio_mac.h
+  s_8bb1fc5a5ea22b::t_84444d1e14c74d 8-9
+host/disk.c
+  s_8bb1fc5a5ea22b::t_6932cc511c6ba6 20
+host/dns_proxy.c
+  s_8bb1fc5a5ea22b::t_22608bdff2b5b7 51-77,220-224,229-232,236,240,247-255,257-258,262,311-313,317-318,332
+host/dns_proxy.h
+  s_8bb1fc5a5ea22b::t_e21cbcc625d5bb 13-16
+host/hvsparse.c
+  s_8bb1fc5a5ea22b::t_2567be82c7781f 38-51,53,57-59,95-96,101-103
+host/jit_region.c
+  s_8bb1fc5a5ea22b::t_02f609a0fd4a98 94-125
+host/jit_region.h
+  s_8bb1fc5a5ea22b::t_b86d887d03deaf 34-39
+host/main.c
+  s_8bb1fc5a5ea22b::t_c12f19f5ef8563 572-583
+host/net_slirp.c
+  s_8bb1fc5a5ea22b::t_770550f301b164 19,54-57,204,283,285-287,290-291,307,324-325,328-358
+host/net_slirp.h
+  s_8bb1fc5a5ea22b::t_8de93d600ed3fb 11-12
+host/prof_ios.c
+  s_8bb1fc5a5ea22b::t_0422390e6eb092 8-10,18,32-61,119,144-147,158
+host/vm.c
+  s_8bb1fc5a5ea22b::t_187ac67430e5f3 29-31,37-40,44-48,105,111-113,115,123,126-127,270-274,278,281-286,349,353-379,382,393-401,408-412,459-471,477,482-505,509,540-551,572,594,635-646
+host/vm.h
+  s_8bb1fc5a5ea22b::t_f7070647b7d0a6 35-37,72-73,92-97
+ios/Henge/BootDisplay.swift
+  s_8bb1fc5a5ea22b::t_c7ee6aef13d697 17,24-33,39-41,45-47,51-55,57,59-76,78,87
+ios/Henge/Hardware.swift
+  s_8bb1fc5a5ea22b::t_a22c0919a153d0 174-175,186-190,228,253-257,259-260
+ios/Henge/HengeApp.swift
+  s_8bb1fc5a5ea22b::t_0f981368bdfb81 71-72,75-91
+ios/Henge/Info.plist
+  s_8bb1fc5a5ea22b::t_33d53d70c1f4c0 64-65
+ios/Henge/Input.swift
+  s_8bb1fc5a5ea22b::t_e54b76f5d2c124 64
+ios/Henge/InstallView.swift
+  s_8bb1fc5a5ea22b::t_98c3b8404e6899 9,26-28,58,72,147-149
+ios/Henge/Installer.swift
+  s_8bb1fc5a5ea22b::t_9cb79ce585815b 11-13,15,18-25,36-38,50,71,88-98,101,113,165-168,170,173-178,180-186
+ios/Henge/JIT/JITBootstrap.swift
+  s_8bb1fc5a5ea22b::t_1999c5c6eb2935 188-212,218,221
+ios/Henge/JIT/JITSetup.swift
+  s_8bb1fc5a5ea22b::t_b0cf8317395f60 203-209,363
+ios/Henge/Machines.swift
+  s_8bb1fc5a5ea22b::t_601c3934689c4e 99-108,110
+ios/Henge/PhysicalMouseButtons.swift
+  s_8bb1fc5a5ea22b::t_a620a78a82eb5c 1-29
+ios/Henge/RangedDownload.swift
+  s_8bb1fc5a5ea22b::t_37b04c9810221a 1-143
+ios/Henge/SessionView.swift
+  s_8bb1fc5a5ea22b::t_e144390ca9ffa8 14,37-38,65,86-133,135-139,157,185,196,204,207,212,357,474,570-588,596,629-632,648-662,670
+ios/Henge/SettingsView.swift
+  s_8bb1fc5a5ea22b::t_3ee94b094dfeee 9-12,19-33,74-76,80-100
+ios/Henge/StoppedMacView.swift
+  s_8bb1fc5a5ea22b::t_43377ac6edb3bd 1-43
+ios/Henge/Trackpad.swift
+  s_8bb1fc5a5ea22b::t_0be7342517a6b3 4-15,17-18,24-26,30-34,38-40,44,58-78,86-97,100,103-106,113-121,123-127,134-139,141-155,158-165,168,171,173-174,180-181,199,220
+ios/Henge/VolumeClicks.swift
+  s_8bb1fc5a5ea22b::t_de8ea49818404f 1-351
+ios/HengeJITHelper/HengeJITHelper.swift
+  s_8bb1fc5a5ea22b::t_6db4f631bcc96d 22,29,48-55,99-118
+ios/HengeJITHelper/RSDPortScanner.swift
+  s_8bb1fc5a5ea22b::t_ccb450065abcda 1-58
+repo.json
+  s_8bb1fc5a5ea22b::t_93045eca801217 1-62
+tests/test_dns_lifecycle.c
+  s_8bb1fc5a5ea22b::t_14f5f58aecf63d 1-153
+tests/test_mmu.c
+  s_8bb1fc5a5ea22b::t_89e142bf732524 385-415
+tests/test_physical_mouse_buttons.swift
+  s_8bb1fc5a5ea22b::t_facb9a2de925c5 1-40
+tests/test_pvg_lifecycle.m
+  s_8bb1fc5a5ea22b::t_3e6de5040c3997 1-38
+tests/test_shutdown.c
+  s_8bb1fc5a5ea22b::t_6f838c0a9f7896 1-119
+tests/test_vm_lifecycle.c
+  s_8bb1fc5a5ea22b::t_086bad31bd1cc0 1-148
+third_party/idevicerestore/src/idevicerestore.c
+  s_8bb1fc5a5ea22b::t_7879c43550bf05 2883-2885
+third_party/idevicerestore/src/img4.c
+  s_8bb1fc5a5ea22b::t_54f29515b14b40 191-193,195-213,216,218-222,224-227,229-233,370-371,373-374,376-377,381,406,423-424,458-459,471-472,616-619,636-640,645-659,661-669,671-674,676-684,686-689,691-696,698-703
+third_party/idevicerestore/src/img4.h
+  s_8bb1fc5a5ea22b::t_d45a6a9be6d260 29-40
+third_party/idevicerestore/src/ipsw.c
+  s_8bb1fc5a5ea22b::t_152acb1698976f 1430-1431,1433-1434,1440,1462-1467,1481-1485
+third_party/idevicerestore/src/recovery.c
+  s_8bb1fc5a5ea22b::t_57d9dfe315d780 24,37-38,287-385,406-414
+third_party/libirecovery/include/libirecovery.h
+  s_8bb1fc5a5ea22b::t_006fea73faae4f 28,182-186
+third_party/libirecovery/src/libirecovery.c
+  s_8bb1fc5a5ea22b::t_8abd71c3783ce5 28,3838-3886
+tools/update-source.py
+  s_8bb1fc5a5ea22b::t_5ae21543448533 1-118
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "0518d035792c0f50d7c429a8c387be5a3896e1e0",
+  "prompts": {},
+  "sessions": {
+    "s_8bb1fc5a5ea22b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "87f81007-16b1-43ac-809d-3d5ed0b4669c",
+        "model": "unknown"
+      },
+      "human_author": "chunli <git@chunli.dev>"
+    },
+    "s_8c78c10c465712": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "eafea5fd-aa24-43fe-89eb-7105f6b20466",
+        "model": "claude-fable-5-2"
+      },
+      "human_author": "chunli <git@chunli.dev>"
+    }
+  }
+}
