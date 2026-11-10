@@ -249,6 +249,102 @@ struct HvGpuVirgl {
 
 static void hostmem_unmap(HvGpuVirgl *v, Res *r);
 
+/* ---- POSIX shared memory, where there is none ----
+
+   virglrenderer's render server and its contexts share memory made with shm_open, and so does dxmt-native. On
+   iOS an app may only name such memory inside an app group, which Henge is not in (it would have to be set up in
+   the developer account that signs it), and every shm_open fails. There the server is a thread of this process
+   and what is shared goes about as file descriptors, so a file does as well: the two libraries' imports of
+   shm_open and shm_unlink are pointed at these, which keep each name as a file in the app's temporary folder.
+   HV_SHM_FILES=1 does the same on a Mac (to test it). */
+#include <fcntl.h>
+#include <mach-o/dyld.h>
+#include <mach-o/loader.h>
+#include <mach-o/nlist.h>
+#include <mach/mach.h>
+#include <stdarg.h>
+#include <TargetConditionals.h>
+
+static void shm_path(const char *name, char *path, size_t n) {
+    const char *tmp = getenv("TMPDIR");
+    int at = snprintf(path, n, "%s/henge-shm-", tmp && *tmp ? tmp : "/tmp");
+    for (; *name && at + 1 < (int)n; name++) path[at++] = *name == '/' ? '_' : *name;
+    path[at] = 0;
+}
+
+static int file_shm_open(const char *name, int oflag, ...) {
+    va_list ap;
+    va_start(ap, oflag);
+    int mode = va_arg(ap, int);
+    va_end(ap);
+    char path[1100];
+    shm_path(name, path, sizeof path);
+    return open(path, oflag, mode ? mode : 0600);
+}
+
+static int file_shm_unlink(const char *name) {
+    char path[1100];
+    shm_path(name, path, sizeof path);
+    return unlink(path);
+}
+
+/* The loaded image whose path ends with `tail` has its import of `symbol` (a pointer in a __got or symbol
+   pointer section) replaced. Returns how many pointers were changed. */
+static int rebind(const char *tail, const char *symbol, void *with) {
+    int changed = 0;
+    for (uint32_t im = 0; im < _dyld_image_count(); im++) {
+        const char *path = _dyld_get_image_name(im);
+        size_t pl = path ? strlen(path) : 0, tl = strlen(tail);
+        if (pl < tl || strcmp(path + pl - tl, tail)) continue;
+        const struct mach_header_64 *mh = (const struct mach_header_64 *)(const void *)_dyld_get_image_header(im);
+        intptr_t slide = _dyld_get_image_vmaddr_slide(im);
+        const struct segment_command_64 *linkedit = NULL;
+        const struct symtab_command *symtab = NULL;
+        const struct dysymtab_command *dysymtab = NULL;
+        const struct load_command *lc = (const struct load_command *)(mh + 1);
+        for (uint32_t i = 0; i < mh->ncmds; i++, lc = (const struct load_command *)(const void *)((const char *)lc + lc->cmdsize)) {
+            if (lc->cmd == LC_SEGMENT_64 && !strcmp(((const struct segment_command_64 *)(const void *)lc)->segname, "__LINKEDIT")) linkedit = (const void *)lc;
+            else if (lc->cmd == LC_SYMTAB) symtab = (const void *)lc;
+            else if (lc->cmd == LC_DYSYMTAB) dysymtab = (const void *)lc;
+        }
+        if (!linkedit || !symtab || !dysymtab) continue;
+        uintptr_t base = (uintptr_t)slide + linkedit->vmaddr - linkedit->fileoff;
+        const struct nlist_64 *syms = (const struct nlist_64 *)(base + symtab->symoff);
+        const char *strings = (const char *)(base + symtab->stroff);
+        const uint32_t *indirect = (const uint32_t *)(base + dysymtab->indirectsymoff);
+        lc = (const struct load_command *)(mh + 1);
+        for (uint32_t i = 0; i < mh->ncmds; i++, lc = (const struct load_command *)(const void *)((const char *)lc + lc->cmdsize)) {
+            if (lc->cmd != LC_SEGMENT_64) continue;
+            const struct segment_command_64 *seg = (const void *)lc;
+            const struct section_64 *sec = (const struct section_64 *)(seg + 1);
+            for (uint32_t k = 0; k < seg->nsects; k++, sec++) {
+                uint32_t type = sec->flags & SECTION_TYPE;
+                if (type != S_LAZY_SYMBOL_POINTERS && type != S_NON_LAZY_SYMBOL_POINTERS) continue;
+                void **ptrs = (void **)((uintptr_t)slide + sec->addr);
+                for (uint64_t j = 0; j < sec->size / sizeof(void *); j++) {
+                    uint32_t si = indirect[sec->reserved1 + j];
+                    if (si & (INDIRECT_SYMBOL_ABS | INDIRECT_SYMBOL_LOCAL) || si >= symtab->nsyms) continue;
+                    if (strcmp(strings + syms[si].n_un.n_strx, symbol)) continue;
+                    vm_address_t page = (vm_address_t)&ptrs[j] & ~(vm_address_t)(vm_page_size - 1);
+                    if (vm_protect(mach_task_self(), page, vm_page_size, 0, VM_PROT_READ | VM_PROT_WRITE | VM_PROT_COPY) != KERN_SUCCESS) continue;
+                    ptrs[j] = with;
+                    changed++;
+                }
+            }
+        }
+    }
+    return changed;
+}
+
+static void shm_as_files(void) {
+    int on = TARGET_OS_IPHONE || getenv("HV_SHM_FILES") != NULL;
+    if (!on) return;
+    static const char *const images[] = {"virglrenderer.1", "dxmt-native"};
+    int n = 0;
+    for (int i = 0; i < 2; i++) n += rebind(images[i], "_shm_open", (void *)file_shm_open) + rebind(images[i], "_shm_unlink", (void *)file_shm_unlink);
+    fprintf(stderr, "hengevm: virgl: shared memory is kept in files (%d imports of the GPU libraries redirected)\n", n);
+}
+
 static void *load(const char *dir, const char *rel, int global) {
     char path[1200];
     snprintf(path, sizeof path, "%s/%s", dir, rel);
@@ -356,6 +452,8 @@ static int bring_up(HvGpuVirgl *v) {
         setenv("NPT_BACKEND", "dxmt", 0);
         snprintf(path, sizeof path, "%s/../macos-server/Contents/XPCServices/QEMUHelper.xpc/Contents/MacOS/QEMURenderServer.app/Contents/MacOS/QEMURenderServer", d);
         if (access(path, X_OK) == 0) setenv("RENDER_SERVER_EXEC_PATH", path, 0);
+        load(d, "dxmt-native.framework/dxmt-native", 0); /* here already, so its imports can be redirected too */
+        shm_as_files();
         flags |= VIRGL_RENDERER_NEPTUNE | VIRGL_RENDERER_RENDER_SERVER;
 #define VO(n) *(void **)&vr.n = dlsym(r, "virgl_renderer_" #n);
         VO(context_create_with_flags) VO(resource_create_blob) VO(resource_map) VO(resource_unmap) VO(resource_map_fixed)
