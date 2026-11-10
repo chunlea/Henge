@@ -77,6 +77,8 @@ size_t hv_vm_serial_input(const uint8_t *buf, size_t len) {
     return n;
 }
 
+int hv_vm_gpu_driver_active(void) { return board.fwcfg && board.gpu && board.gpu->d3d && board.gpu->enabled; }
+
 int hv_vm_boot_display(HvBootDisplay *d) {
     if (board.fwcfg && board.gpu && board.gpu->enabled) { /* the guest's GPU driver has the display */
         static uint32_t *composed;
@@ -365,7 +367,7 @@ int hv_vm_create(const HvVmConfig *c, char *err, size_t errlen) {
     if (uefi) {
         HvVirtParams vp = {.ncpus = ncpus, .ram_size = (c->ram_mb ? c->ram_mb : 4096) << 20, .disk = have_disk ? &disk : NULL,
                            .cdrom = c->cdrom ? &aux : NULL, .mac = mac, .vars_path = c->uefi_vars,
-                           .screen_width = c->fb_width, .screen_height = c->fb_height, .gpu_dir = c->uefi_gpu};
+                           .screen_width = c->fb_width, .screen_height = c->fb_height, .gpu_dir = c->uefi_gpu, .no_ramfb = c->uefi_gpu_only};
         if (hv_virt_create(&board, &m, cpus, &vp) != 0)
             return fail(err, errlen, "Cannot build the machine (not enough memory for the guest's RAM?).");
         HvUefiBoot ub = {.code = c->uefi_code, .dtb_out = getenv("HV_DTB_OUT")};

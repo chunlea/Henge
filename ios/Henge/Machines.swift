@@ -46,6 +46,9 @@ struct VirtualMac: Identifiable, Codable, Hashable {
     var tools: URL { directory.appendingPathComponent("tools.iso") }
     /// A Windows machine's GPU (EngineTuning.windowsGPU): on unless turned off.
     var gpu: Bool?
+    /// Windows has the GPU's driver: seen taking the display in a session. The machine then starts with the GPU as
+    /// its only display (the firmware's framebuffer would be a second monitor to Windows).
+    var gpuDriver: Bool?
 }
 
 /// How much RAM a Mac gets. The engine first asks the kernel to leave it out of Henge's footprint,
