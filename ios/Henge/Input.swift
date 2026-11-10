@@ -61,7 +61,7 @@ struct KeyboardCatcher: UIViewRepresentable {
     /// Whichever view holds the keyboard hears a hardware keyboard's keys here.
     class KeyListener: UIView {
         override var canBecomeFirstResponder: Bool { true }
-        /// Three fingers belong to the session (they show its controls), not to iPadOS's undo/copy/paste bar.
+        /// Fingers belong to the session (they drive the Mac's trackpad), not to iPadOS's undo/copy/paste bar.
         override var editingInteractionConfiguration: UIEditingInteractionConfiguration { .none }
 
         /// ⌘-Space is iPadOS's Spotlight, but Linux desktops (Omarchy's launcher) want it as Super-Space. Ask

@@ -68,12 +68,27 @@ struct RootView: View {
         }
         .preferredColorScheme(.dark)
         .sheet(isPresented: $jit.showSetup) { JITSetupFlow() }
-        .onChange(of: scenePhase) { phase in
-            guard phase == .active else { return }
-            // Back from StikDebug or TrollStore: claim the JIT region while the debugger is there.
-            JITBootstrap.prewarm()
+        .task(id: scenePhase) {
+            guard scenePhase == .active else { return }
             machines.collectImports()
             jit.enableAtLaunchIfAsked()
+            // StikDebug can launch Henge before it attaches. A task also runs
+            // on the first appearance, when there may be no phase change.
+            for _ in 0..<100 {
+                guard !Task.isCancelled else { return }
+                if JITBootstrap.prewarmed || JITBootstrap.isLive {
+                    jit.objectWillChange.send()
+                    return
+                }
+                if JITBootstrap.debuggedFlag || JITBootstrap.canGrantOwnJIT {
+                    JITBootstrap.prewarm()
+                    // Readiness lives outside the observable coordinator.
+                    jit.objectWillChange.send()
+                    return
+                }
+                do { try await Task.sleep(nanoseconds: 100_000_000) }
+                catch { return } // going into the background cancels this wait
+            }
         }
         .onChange(of: jit.attachGeneration) { _ in JITBootstrap.prewarm() } // the built-in helper attached
         .onReceive(NotificationCenter.default.publisher(for: Autopilot.showTab)) { note in

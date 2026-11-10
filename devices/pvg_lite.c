@@ -35,6 +35,21 @@
 #include <os/lock.h>
 #include <stdatomic.h>
 #include "pvg_lite.h"
+#include <mach/mach_time.h>
+
+int hv_pvg_trace_on(void) {
+    static const char *tf;
+    static int read, on;
+    static _Atomic uint64_t next;
+    if (!read) read = 1, tf = getenv("HV_PVG_TRACE_FILE");
+    if (!tf) return 0;
+    uint64_t now = mach_absolute_time();
+    if (now >= atomic_load_explicit(&next, memory_order_relaxed)) {
+        on = access(tf, F_OK) == 0;
+        atomic_store_explicit(&next, now + 2400000, memory_order_relaxed); /* 100 ms of 24 MHz ticks */
+    }
+    return on;
+}
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -65,6 +80,7 @@ struct HvPvgLite {
     int layer_set; /* an explicit NULL also overrides the renderer's Mac test layer */
     uint32_t task_root[512]; /* page of each task's root, by the id in commands */
     uint64_t task_objects[512], task_placement[512]; /* task offsets of its object lists */
+    int old_driver; /* macOS 14's (and older?) GPU driver: object lists at a fixed place, compact surface descriptions */
     uint8_t obj_seen[512][8192];
     int tally;
     uint64_t counts[6][256];
@@ -340,9 +356,22 @@ void *hv_pvg_lite_phys(HvPvgLite *p, uint64_t pa, uint64_t length) {
     return hv_phys_ptr(p->m, pa, length);
 }
 
+/* macOS 15 and later name each task's object list with command 0x44. Older guest drivers (macOS 14 Sonoma
+   seen) never send it: their list is at task offset 0x4000, the same 12-byte entries (found by probing). */
+#define OLD_DRIVER_OBJECTS 0x4000
 uint64_t hv_pvg_lite_task_objects(HvPvgLite *p, uint32_t task) {
-    return task < 512 ? p->task_objects[task] : 0;
+    if (task >= 512) return 0;
+    if (!p->task_objects[task] && p->task_root[task]) {
+        if (!p->old_driver) {
+            p->old_driver = 1;
+            fprintf(stderr, "hengevm: pvg-lite: an older guest GPU driver (no object list command): its own layouts\n");
+        }
+        return OLD_DRIVER_OBJECTS;
+    }
+    return p->task_objects[task];
 }
+
+int hv_pvg_lite_old_driver(HvPvgLite *p) { return p->old_driver; }
 
 /* A stamp Metal finished: the guest sees it and the next poll raises the interrupt. */
 void hv_pvg_lite_complete(HvPvgLite *p, uint32_t ch, uint32_t stamp) {
@@ -491,6 +520,19 @@ static void channel_command(HvPvgLite *p, const uint32_t *table, uint32_t size, 
     uint32_t op = hdr[0] & 0xffff, args[32], skip = (hdr[0] >> 16) * 8; /* the barriers come first */
     uint32_t n = hdr[1] > 12 + skip ? hdr[1] - 12 - skip : 0;
     if (n > sizeof args) n = sizeof args;
+    {   /* HV_PVG_OPS=1: the first of each channel command the guest sends, with its words (a driver whose commands differ) */
+        static int on = -1;
+        static uint8_t seen[0x10000 / 8];
+        if (on < 0) on = getenv("HV_PVG_OPS") != NULL;
+        if (on && !(seen[op / 8] & (1 << (op % 8)))) {
+            seen[op / 8] |= (uint8_t)(1 << (op % 8));
+            uint32_t w[16] = {0};
+            ring_read(p, table, size, rd + 12 + skip, w, n < sizeof w ? n : sizeof w);
+            fprintf(stderr, "pvgop 0x%x len %u skip %u:", op, hdr[1], skip);
+            for (uint32_t i = 0; i < 16 && i * 4 < n; i++) fprintf(stderr, " %08x", w[i]);
+            fprintf(stderr, "\n");
+        }
+    }
     if (op == 0x38) {
         ring_read(p, table, size, rd + 12 + skip, args, 16);
         if (args[0] >> 1 < 512) p->task_root[args[0] >> 1] = args[3];
@@ -515,13 +557,15 @@ static void channel_command(HvPvgLite *p, const uint32_t *table, uint32_t size, 
     else display_swap(p, (uint64_t)args[3] << 32 | args[2], args);
 }
 
-/* The mapper's table: a u32 per 16 KB of descriptors (16 of them), physical
-   address >> 12 with bit 0 meaning present. */
+/* The mapper's table: a u32 per 16 KB of descriptors, physical address >> 12 with bit 0 meaning present. */
 const uint8_t *hv_pvg_lite_surface(HvPvgLite *p, uint32_t mapping) {
+    /* macOS 14's driver writes 0x200-byte descriptions, 32 to a page; later ones 0x400, 16 to a page. Reading the
+       older ones as 0x400 apart put id 2k on the first half of "slot" k and never read id 2k+1 at all. */
+    uint32_t per = p->old_driver ? 32 : 16, size = 0x4000 / per;
     uint64_t table = p->io_regs[0x10 / 8];
-    uint32_t *e = table ? hv_phys_ptr(p->m, table + (mapping / 16) * 4ull, 4) : NULL;
+    uint32_t *e = table ? hv_phys_ptr(p->m, table + (mapping / per) * 4ull, 4) : NULL;
     if (!e || !(*e & 1)) return NULL;
-    return hv_phys_ptr(p->m, ((uint64_t)(*e & ~1u) << 12) + (mapping % 16) * 0x400ull, 0x400);
+    return hv_phys_ptr(p->m, ((uint64_t)(*e & ~1u) << 12) + (mapping % per) * (uint64_t)size, size);
 }
 
 uint8_t *hv_pvg_lite_display_page(HvPvgLite *p) {
@@ -565,9 +609,7 @@ static void do_channel(HvPvgLite *p, uint32_t ch) {
         }
         if (p->log) fprintf(stderr, "hengevm: pvg-lite: ch %u op %x len %x stamp %x\n", ch, hdr[0], hdr[1], hdr[2]);
         {   /* HV_PVG_TRACE_FILE exists: the order commands reach the device in, with what a swap says */
-            static const char *tf; static int tf_read;
-            if (!tf_read) tf_read = 1, tf = getenv("HV_PVG_TRACE_FILE");
-            if (tf && access(tf, F_OK) == 0) {
+            if (hv_pvg_trace_on()) {
                 uint32_t w[12] = {0};
                 ring_read(p, table, size, rd + 12, w, hdr[1] - 12 < sizeof w ? hdr[1] - 12 : sizeof w);
                 fprintf(stderr, "trace: dev ch %u op %x len %u stamp %x sub %x args %x %x %x %x %x %x %x %x\n", ch, hdr[0], hdr[1], hdr[2], p->submitted[ch], w[0], w[1], w[2], w[3], w[4], w[5], w[6], w[7]);
@@ -735,4 +777,11 @@ HvPvgLite *hv_pvg_lite_create(HvMachine *m, HvGic *gic, uint64_t gfx_pa, uint64_
     hv_machine_add_mmio(m, gfx_pa, 0x10000, p, gfx_read, gfx_write, "gfx");
     hv_machine_add_mmio(m, iosfc_pa, 0x10000, p, iosfc_read, iosfc_write, "iosurface");
     return p;
+}
+
+void hv_pvg_lite_destroy(HvPvgLite *p) {
+    if (!p) return;
+    hv_pvg_metal_destroy(atomic_exchange(&p->metal, NULL));
+    if (p->layer) CFRelease(p->layer);
+    free(p);
 }

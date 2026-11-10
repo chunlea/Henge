@@ -75,3 +75,14 @@ static void stop(void *opaque) {
 void hv_audio_attach(HvVirtioSnd *d) {
     d->backend = (HvVirtioSndBackend){start, stop, d};
 }
+
+void hv_audio_detach(void) {
+    if (unit) {
+        AudioOutputUnitStop(unit);
+        AudioUnitUninitialize(unit);
+        AudioComponentInstanceDispose(unit);
+        unit = NULL;
+    }
+    unit_running = 0;
+    cur_channels = cur_format = cur_rate = 0;
+}

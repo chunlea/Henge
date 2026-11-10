@@ -54,8 +54,7 @@ static void pvpanic_write(void *opaque, uint64_t off, uint64_t v, unsigned size)
         }
         p += sizeof key - 1;
     }
-    if (v & 1)
-        for (int i = 0; i < b->ncpus; i++) b->cpu[i].halted = 4;
+    if (v & 1) hv_machine_halt(b->m, HV_HALT_PANIC);
 }
 
 /* Not in QEMU's vmapple, which targets macOS 12 guests. iBootStage2 (Sequoia)
@@ -123,8 +122,10 @@ static void avp_regs_write(void *opaque, uint64_t off, uint64_t v, unsigned size
 
 static void avp_put(AvpRegs *r, uint64_t off, uint64_t v, unsigned size) { memcpy(r->regs + off, &v, size); }
 
-static void avp_regs_create(HvMachine *m, uint64_t ram_size) {
+static void avp_regs_create(HvVmapple *b, uint64_t ram_size) {
+    HvMachine *m = b->m;
     AvpRegs *ctrr = calloc(1, sizeof *ctrr), *sealed = calloc(1, sizeof *sealed);
+    b->ctrr = ctrr, b->sealed = sealed;
     ctrr->name = "avp-ctrr", sealed->name = "avp-sealed-registers";
     ctrr->log = sealed->log = getenv("HV_AVP_LOG") != NULL;
     avp_put(ctrr, 0x00, 0x63747272, 4);
@@ -277,8 +278,7 @@ int hv_vmapple_create(HvVmapple *b, HvMachine *m, HvCpu *cpu, uint64_t ram_size,
             if (!getenv("HV_RAM_NO_PREFAULT")) {
                 struct PrefaultArgs *a = malloc(sizeof *a);
                 a->ram = b->ram, a->size = ram_size;
-                pthread_t t;
-                if (pthread_create(&t, NULL, prefault_thread, a) == 0) pthread_detach(t);
+                if (pthread_create(&b->prefault_thread, NULL, prefault_thread, a) == 0) b->prefault_started = 1;
                 else free(a);
             }
         }
@@ -301,7 +301,7 @@ int hv_vmapple_create(HvVmapple *b, HvMachine *m, HvCpu *cpu, uint64_t ram_size,
     hv_machine_add_mmio(m, VMAPPLE_PVPANIC, 2, b, pvpanic_read, pvpanic_write, "pvpanic");
     b->pvg = hv_pvg_lite_create(m, b->gic, VMAPPLE_GFX, VMAPPLE_IOSFC, 32 + 0x11, 32 + 0x10);
     hv_machine_add_mmio(m, VMAPPLE_RTC_SELECT, 0x4000, b, rtc_select_read, rtc_select_write, "rtc-select");
-    avp_regs_create(m, ram_size);
+    avp_regs_create(b, ram_size);
     HvCfgParams p = *cfg;
     p.ram_size = ram_size;
     b->cfg = hv_cfg_create(m, VMAPPLE_CONFIG, &p);
@@ -320,6 +320,7 @@ int hv_vmapple_create(HvVmapple *b, HvMachine *m, HvCpu *cpu, uint64_t ram_size,
     b->keyboard = hv_virtio_input_create(m, b->pcie, HV_VINPUT_KEYBOARD);
     if (!order) b->mouse = hv_virtio_input_create(m, b->pcie, HV_VINPUT_MOUSE);
     if (!getenv("HV_NO_SOUND")) b->snd = hv_virtio_snd_create(m, b->pcie);
+    if ((aux && !b->aux_blk) || (root && !b->root_blk)) return -1;
     if (getenv("HV_BALLOON")) {
         b->balloon = hv_virtio_balloon_create(m, b->pcie, b->ram, VMAPPLE_MEM, ram_size, b->ram_fd);
         hv_virtio_balloon_set_target(b->balloon, (uint64_t)atoll(getenv("HV_BALLOON")) << 20);
@@ -353,4 +354,39 @@ void hv_vmapple_reset_cpu(HvVmapple *b) {
         c->pc = VMAPPLE_FIRMWARE;
         c->off = i != 0; /* secondaries wait for PSCI CPU_ON */
     }
+}
+
+void hv_vmapple_destroy(HvVmapple *b) {
+    if (b->prefault_started) pthread_join(b->prefault_thread, NULL);
+    /* Device workers and GPU completions can still touch RAM and the GIC. */
+    hv_virtio_blk_destroy(b->root_blk);
+    hv_virtio_blk_destroy(b->aux_blk);
+    hv_pvg_lite_destroy(b->pvg);
+    if (b->vusb) {
+        hv_vusb_set_online(b->vusb, 0);
+        pthread_mutex_destroy(&b->vusb->mu);
+        pthread_cond_destroy(&b->vusb->cv);
+        free(b->vusb);
+    }
+    if (b->snd) { free(b->snd->ring); free(b->snd); }
+    free(b->balloon);
+    if (b->keyboard) { pthread_mutex_destroy(&b->keyboard->mu); free(b->keyboard); }
+    if (b->mouse) { pthread_mutex_destroy(&b->mouse->mu); free(b->mouse); }
+    if (b->usb) { pthread_mutex_destroy(&b->usb->mu); free(b->usb); }
+    if (b->gic) { pthread_mutex_destroy(&b->gic->mu); free(b->gic); }
+    free(b->net);
+    free(b->pcie);
+    free(b->uart);
+    free(b->rtc);
+    free(b->gpio);
+    free(b->bdif);
+    free(b->aes);
+    free(b->ctrr);
+    free(b->sealed);
+    free(b->cfg);
+    if (b->rom && b->rom != MAP_FAILED) munmap(b->rom, ROM_SIZE);
+    if (b->ram && b->ram != MAP_FAILED) munmap(b->ram, b->ram_size);
+    if (b->ram_fd >= 0) close(b->ram_fd);
+    memset(b, 0, sizeof *b);
+    b->ram_fd = -1;
 }

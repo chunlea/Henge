@@ -5,6 +5,9 @@ JIT instead of hardware virtualization, so the same engine can run on iOS, where
 apps have no hypervisor access. The engine is built and tested on the Mac
 (`build/hengevm`) and linked into the iPhone app (`make ios-lib`).
 
+The guest's terminal power requests and iOS session cleanup are described in
+[Guest shutdown](guest-shutdown.md).
+
 ## Layout
 
 - `core/`: guest CPU state, the block translator, the software MMU, and exceptions.
@@ -55,6 +58,18 @@ it. Nothing here comes from Virtualization.framework.
 macOS draws through Apple's paravirtual GPU. iOS has no ParavirtualizedGraphics
 framework, so `devices/pvg_lite.c` takes the guest's command streams and
 `devices/pvg_metal.m` replays them with Metal.
+
+## The trackpad
+
+The device's screen is the Mac's trackpad. It is presented to the guest as a
+Magic Trackpad 2 on the xHCI USB bus (`devices/xhci.c`): Apple's vendor-defined
+multitouch format, report ID 2 with a 12-byte prefix and nine bytes a finger,
+in the pad's 8134 x 5206 sensor units. Because the guest's own multitouch
+engine sees a real Apple pad, it does the pointing, the scrolling and the
+gestures itself — the app sends only finger positions. Clicking is the volume
+buttons' job on iPhone (`VolumeClicks.swift`): up left, down right, hold to drag.
+The format follows the Linux kernel's
+`hid-magicmouse` MT2 support and VoodooInput's Magic Trackpad II emulation.
 
 ## The boot ROM
 

@@ -569,6 +569,18 @@ static void *input_thread(void *unused) {
                 hv_virtio_input_send(board.mouse, HV_EV_SYN, 0, 0);
             }
         }
+        else if (!strncmp(line, "tp ", 3)) { /* "tp ID 0|1|2 X Y": a finger down/move/up on the USB Magic Trackpad 2, sensor units (testing) */
+            int id = 0, phase = 0, px = 0, py = 0;
+            if (sscanf(line + 3, "%d %d %d %d", &id, &phase, &px, &py) == 4) {
+                struct timespec ts;
+                clock_gettime(CLOCK_MONOTONIC, &ts);
+                uint32_t ms = (uint32_t)((uint64_t)ts.tv_sec * 1000 + (uint64_t)ts.tv_nsec / 1000000);
+                hv_xhci_touch(board.usb, id, phase, px, py, ms);
+                if (phase == 1) hv_xhci_touch_frame(board.usb, ms);
+            }
+        }
+        else if (!strncmp(line, "tpclick ", 8)) /* "tpclick 1|0": the Magic Trackpad 2's own press (testing) */
+            hv_xhci_touch_button(board.usb, atoi(line + 8));
         else if (!strncmp(line, "press", 5) || !strncmp(line, "release", 7)) {
             hv_virtio_input_send(board.mouse, HV_EV_KEY, HV_BTN_LEFT, line[0] == 'p');
             hv_virtio_input_send(board.mouse, HV_EV_SYN, 0, 0);

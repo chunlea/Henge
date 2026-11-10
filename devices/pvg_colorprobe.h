@@ -610,7 +610,7 @@ static void cp_start(HvReplay *r) {
     dispatch_source_t timer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, r->worker);
     dispatch_source_set_timer(timer, dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), NSEC_PER_SEC, NSEC_PER_SEC / 10);
     HvReplay *__weak weak = r;
-    dispatch_source_set_event_handler(timer, ^{ HvReplay *strong = weak; if (strong) cp_tick(strong); });
+    dispatch_source_set_event_handler(timer, ^{ HvReplay *strong = weak; if (strong && !atomic_load(&strong->stopping)) cp_tick(strong); });
     dispatch_resume(timer);
     cp.timer = timer;
 }

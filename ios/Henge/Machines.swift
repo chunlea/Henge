@@ -96,7 +96,18 @@ final class Machines: ObservableObject {
     /// Machine folders nothing refers to (an install cut short by a crash or by quitting): their disks take real space.
     /// A folder whose install finished (Henge stopped before it was listed) is listed again instead, and nothing is
     /// removed when the list itself could not be read: every Mac would look unreferenced.
+    /// Downloads by builds before 0.3 kept a stopped download in the system's temporary files, where nothing could resume
+    /// or delete it (#58): those go. Downloads now stay in Restore images as .part files and go on from there.
+    private func removeOldTemporaryDownloads() {
+        let tmp = URL(fileURLWithPath: NSTemporaryDirectory())
+        guard let names = try? FileManager.default.contentsOfDirectory(atPath: tmp.path) else { return }
+        for name in names where name.hasPrefix("CFNetworkDownload_") && name.hasSuffix(".tmp") {
+            try? FileManager.default.removeItem(at: tmp.appendingPathComponent(name))
+        }
+    }
+
     private func removeLeftovers() {
+        removeOldTemporaryDownloads()
         if listUnreadable {
             HengeLog.log("machines", "the list of Macs could not be read: no machine folder is removed")
             return

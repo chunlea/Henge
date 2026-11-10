@@ -6,6 +6,10 @@
 
 struct HvMachine;
 
+enum HvHaltReason {
+    HV_HALT_NONE, HV_HALT_SHUTDOWN, HV_HALT_RESET, HV_HALT_HOST, HV_HALT_PANIC
+};
+
 /* One software TLB entry. host = guest VA + addend. The exec tag is the guest
    VA of the page (HV_TLB_PAGE_BITS: 16 KB, or 4 KB for Linux). The read and
    write tags are that minus HV_TLB_ADJ, so translated code checks "same page,
@@ -169,7 +173,7 @@ typedef struct HvCpu {
     uint32_t index;          /* which CPU: m->percpu[index] holds its caches and interrupt lines */
     struct HvPerCpu *pc_state;
     uint64_t icount;         /* blocks entered, for tests and stats */
-    int halted;              /* SYSTEM_OFF / SYSTEM_RESET / guest panic: the machine stops */
+    _Atomic int halted;      /* HvHaltReason; published across CPU and UI threads */
     int off;                 /* PSCI: powered off (a secondary not started yet, or CPU_OFF) until CPU_ON */
     int parked_off;          /* off, and its thread is waiting (so CPU_ON may reset it) */
 } HvCpu;

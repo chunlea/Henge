@@ -8,6 +8,8 @@
 void hv_net_set_share_socket(const char *path);
 /* User-mode NAT for the guest's virtio-net (see net_slirp.c). Returns 0 on success. */
 int hv_net_attach(HvMachine *m, HvVirtioNet *n);
+/* CPUs must be stopped. Joins the network worker before its machine is freed. */
+void hv_net_detach(void);
 /* CPU thread, from the board's tick: hand frames for the guest to the device. */
 void hv_net_poll(void);
 

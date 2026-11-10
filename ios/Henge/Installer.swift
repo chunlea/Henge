@@ -8,10 +8,21 @@ struct MacOSRelease: Identifiable, Hashable {
     let url: URL
     let bytes: Int64
     let note: String
+    /// Room the new Mac takes once installed and set up, with a margin for its first updates and caches
+    /// (installed and set up on the Mac in phone mode: Sonoma 21 GB, Ventura 19 GB).
+    var macBytes: Int64 = 24 << 30
 
-    /// The builds offered, newest last. Apple's catalog (mesu.apple.com) only lists the newest;
+    /// The builds offered, oldest first. Apple's catalog (mesu.apple.com) only lists the newest;
     /// these are the same images from Apple's CDN, and Apple still signs them for virtual Macs.
     static let all: [MacOSRelease] = [
+        /* macOS Monterey 12.6 (21G115, 2022FallFCS/fullrestores/012-40537/0EC7C669-13E9-49FB-BD64-9EECC1D174B2) installs and boots,
+           but its GPU driver (protocol 0x1f) never starts WindowServer's GPU work under Henge yet: not offered until it does. */
+        MacOSRelease(id: "22G120", name: "macOS Ventura 13.6",
+                     url: URL(string: "https://updates.cdn-apple.com/2023FallFCS/fullrestores/042-55833/C0830847-A2F8-458F-B680-967991820931/UniversalMac_13.6_22G120_Restore.ipsw")!,
+                     bytes: 12_297 << 20, note: "The smallest download (and about 35 GB in all), for devices short on storage.", macBytes: 23 << 30),
+        MacOSRelease(id: "23G93", name: "macOS Sonoma 14.6.1",
+                     url: URL(string: "https://updates.cdn-apple.com/2024SummerFCS/fullrestores/062-52859/932E0A8F-6644-4759-82DA-F8FA8DEA806A/UniversalMac_14.6.1_23G93_Restore.ipsw")!,
+                     bytes: 14_106 << 20, note: "A smaller download than Sequoia, and still supported by most apps.", macBytes: 26 << 30),
         MacOSRelease(id: "24G90", name: "macOS Sequoia 15.6.1",
                      url: URL(string: "https://updates.cdn-apple.com/2025SummerFCS/fullrestores/093-10809/CFD6DD38-DAF0-40DA-854F-31AAD1294C6F/UniversalMac_15.6.1_24G90_Restore.ipsw")!,
                      bytes: 16_035 << 20, note: "Recommended: the version Henge is tested with."),
@@ -22,6 +33,9 @@ struct MacOSRelease: Identifiable, Hashable {
                      url: URL(string: "https://updates.cdn-apple.com/2026FallFCS/c9671975-52db-4fb5-9af2-00217169ba8d/UniversalMac_27.2_26B123_Restore.ipsw")!,
                      bytes: 24_409 << 20, note: "The newest. Not tested with Henge yet."),
     ]
+
+    /// Selected in the Install tab when nothing is downloaded yet: the one Henge is tested with most.
+    static let recommended = all.first { $0.id == "24G90" } ?? all[0]
 }
 
 /// Downloads a restore image and installs it on a new virtual Mac, on the
@@ -33,6 +47,7 @@ final class Installer: NSObject, ObservableObject {
 
     enum Phase: Equatable {
         case idle
+        case checking
         case downloading
         case preparing
         case installing
@@ -47,17 +62,13 @@ final class Installer: NSObject, ObservableObject {
     @Published private(set) var stepProgress: Double = 0
     @Published private(set) var machineName = ""
 
-    private var session: URLSession?
     /* Background time, so a moment out of the foreground (a notification, iPhone Mirroring reconnecting)
        does not suspend the restore at once; iOS gives about 30 s. */
     private var grace = UIBackgroundTaskIdentifier.invalid
-    private var downloadContinuation: CheckedContinuation<URL, Error>?
-    nonisolated(unsafe) private var downloadTarget: URL? // set before the task starts, read by the delegate
-    private var lastResumeData: Data?
 
     var busy: Bool {
         switch phase {
-        case .downloading, .preparing, .installing: return true
+        case .checking, .downloading, .preparing, .installing: return true
         default: return false
         }
     }
@@ -74,11 +85,20 @@ final class Installer: NSObject, ObservableObject {
 
     static func haveImage(_ r: MacOSRelease) -> Bool { imageSize(r) != nil }
 
-    static func deleteImage(_ r: MacOSRelease) { try? FileManager.default.removeItem(at: imagePath(r)) }
+    static func deleteImage(_ r: MacOSRelease) {
+        try? FileManager.default.removeItem(at: imagePath(r))
+        try? FileManager.default.removeItem(at: partPath(r))
+    }
+    /// Where a download in progress (or stopped partway) is kept.
+    nonisolated static func partPath(_ r: MacOSRelease) -> URL { imageDirectory.appendingPathComponent("\(r.id).ipsw.part") }
+    /// Bytes of a download that stopped partway, or nil.
+    static func partSize(_ r: MacOSRelease) -> Int64? {
+        let n = RangedDownload.size(of: partPath(r))
+        return n > 0 ? n : nil
+    }
 
     /// Free space an install takes: the new Mac's disk, and the download if it is not here yet.
-    static func spaceNeeded(_ r: MacOSRelease) -> Int64 { (haveImage(r) ? 0 : r.bytes) + newMacBytes }
-    private static let newMacBytes: Int64 = 24 << 30
+    static func spaceNeeded(_ r: MacOSRelease) -> Int64 { (haveImage(r) ? 0 : max(r.bytes - (partSize(r) ?? 0), 0)) + r.macBytes }
 
     func reset() { if !busy { phase = .idle } }
 
@@ -90,6 +110,7 @@ final class Installer: NSObject, ObservableObject {
 
     func start(_ release: MacOSRelease, name: String, ramMB: Int, cpus: Int, keepImage: Bool) {
         guard !busy else { return }
+        phase = .checking
         machineName = name
         UIApplication.shared.isIdleTimerDisabled = true // the screen locking would suspend the download and the restore
         grace = UIApplication.shared.beginBackgroundTask(withName: "Henge install") {
@@ -141,35 +162,34 @@ final class Installer: NSObject, ObservableObject {
             return dest
         }
         phase = .downloading
-        received = 0
+        // Into a .part file next to where it ends up: an interrupted download (no network, Henge closed or killed)
+        // goes on from where it stopped next time, and Install's trash button deletes a partial one too (#58).
+        let part = Self.partPath(r)
+        received = RangedDownload.size(of: part)
         expected = r.bytes
-        downloadTarget = dest
+        if received > 0 { HengeLog.log("install", "going on with \(r.name)'s download from \(ByteText.string(UInt64(received)))") }
         HengeLog.log("install", "downloading \(r.url.absoluteString)")
         for attempt in 1...20 {
+            let d = RangedDownload(url: r.url, part: part) { have, total in
+                Task { @MainActor in
+                    Installer.shared.received = have
+                    if total > 0 { Installer.shared.expected = total }
+                }
+            }
             do {
-                return try await downloadOnce(r.url)
-            } catch let error as URLError where error.code != .cancelled && attempt < 20 {
-                lastResumeData = error.downloadTaskResumeData ?? lastResumeData
-                HengeLog.log("install", "download interrupted (\(error.localizedDescription)); resuming")
+                try await d.run()
+                try? FileManager.default.removeItem(at: dest)
+                try FileManager.default.moveItem(at: part, to: dest)
+                return dest
+            } catch {
+                if Task.isCancelled || attempt == 20 { throw error }
+                HengeLog.log("install", "download interrupted (\(error.localizedDescription)) at \(ByteText.string(UInt64(RangedDownload.size(of: part)))); going on")
                 try await Task.sleep(nanoseconds: 3_000_000_000)
             }
         }
         throw message("The download kept failing.")
     }
 
-    private func downloadOnce(_ url: URL) async throws -> URL {
-        let cfg = URLSessionConfiguration.default
-        cfg.timeoutIntervalForRequest = 120
-        cfg.timeoutIntervalForResource = 48 * 3600
-        let s = URLSession(configuration: cfg, delegate: self, delegateQueue: nil)
-        session = s
-        return try await withCheckedThrowingContinuation { (c: CheckedContinuation<URL, Error>) in
-            downloadContinuation = c
-            let task = lastResumeData.map { s.downloadTask(withResumeData: $0) } ?? s.downloadTask(with: url)
-            lastResumeData = nil
-            task.resume()
-        }
-    }
 
     // MARK: The new machine
 
@@ -253,47 +273,3 @@ final class Installer: NSObject, ObservableObject {
     }
 }
 
-extension Installer: URLSessionDownloadDelegate {
-    nonisolated func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didWriteData bytesWritten: Int64,
-                                totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64) {
-        Task { @MainActor in
-            self.received = totalBytesWritten
-            if totalBytesExpectedToWrite > 0 { self.expected = totalBytesExpectedToWrite }
-        }
-    }
-
-    nonisolated func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didResumeAtOffset fileOffset: Int64,
-                                expectedTotalBytes: Int64) {
-        Task { @MainActor in self.received = fileOffset }
-    }
-
-    nonisolated func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {
-        // The file is gone when this returns: move it now, on this thread.
-        let target = self.downloadTarget
-        let status = (downloadTask.response as? HTTPURLResponse)?.statusCode ?? 0
-        do {
-            guard let target, status == 200 || status == 206 else {
-                throw NSError(domain: "Henge", code: 3, userInfo: [NSLocalizedDescriptionKey: "Apple's server answered \(status)."])
-            }
-            try? FileManager.default.removeItem(at: target)
-            try FileManager.default.moveItem(at: location, to: target)
-            Task { @MainActor in
-                self.downloadContinuation?.resume(returning: target)
-                self.downloadContinuation = nil
-            }
-        } catch {
-            Task { @MainActor in
-                self.downloadContinuation?.resume(throwing: error)
-                self.downloadContinuation = nil
-            }
-        }
-    }
-
-    nonisolated func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
-        guard let error else { return }
-        Task { @MainActor in
-            self.downloadContinuation?.resume(throwing: error)
-            self.downloadContinuation = nil
-        }
-    }
-}

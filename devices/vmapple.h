@@ -75,6 +75,9 @@ typedef struct HvVmapple {
     uint64_t ram_size;
     int ram_fd;              /* the file under guest RAM, kept open for the balloon's holes, or -1 */
     uint64_t panic_events;   /* last pvpanic event the guest reported */
+    void *ctrr, *sealed;
+    pthread_t prefault_thread;
+    int prefault_started;
     void (*poll)(void);      /* extra device work on the CPU thread each tick (Mac PVG) */
     /* A Linux guest's display (host/linux_boot.c): a simple-framebuffer in the top of
        guest RAM, left out of the memory the guest is told about. 0 for macOS. */
@@ -91,5 +94,7 @@ int hv_vmapple_create(HvVmapple *b, HvMachine *m, HvCpu *cpus, uint64_t ram_size
 int hv_vmapple_load_rom(HvVmapple *b, const char *path);
 /* CPU reset: EL1, MMU off, interrupts masked, at the start of the ROM. */
 void hv_vmapple_reset_cpu(HvVmapple *b);
+/* No CPU or host device callback may be using the board. */
+void hv_vmapple_destroy(HvVmapple *b);
 
 #endif

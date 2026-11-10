@@ -48,6 +48,33 @@ typedef struct {
 static atomic_int inflight, unanswered_in_a_row;
 static atomic_ullong answered, handed_back, timed_out;
 #define GIVE_UP 8 /* lookups in a row the resolver took but never answered: back to libslirp for the session */
+static atomic_int stopping;
+static pthread_mutex_t lifecycle_mu = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t lifecycle_cv = PTHREAD_COND_INITIALIZER;
+
+static void lookup_finished(void) {
+    pthread_mutex_lock(&lifecycle_mu);
+    atomic_fetch_sub(&inflight, 1);
+    pthread_cond_broadcast(&lifecycle_cv);
+    pthread_mutex_unlock(&lifecycle_mu);
+}
+
+void hv_dns_proxy_start(void) {
+    pthread_mutex_lock(&lifecycle_mu);
+    atomic_store(&stopping, 0);
+    atomic_store(&answered, 0);
+    atomic_store(&handed_back, 0);
+    atomic_store(&timed_out, 0);
+    atomic_store(&unanswered_in_a_row, 0);
+    pthread_mutex_unlock(&lifecycle_mu);
+}
+
+void hv_dns_proxy_stop(void) {
+    pthread_mutex_lock(&lifecycle_mu);
+    atomic_store(&stopping, 1);
+    while (atomic_load(&inflight)) pthread_cond_wait(&lifecycle_cv, &lifecycle_mu);
+    pthread_mutex_unlock(&lifecycle_mu);
+}
 
 static int64_t now_ms(void) {
     struct timespec ts;
@@ -190,40 +217,49 @@ static void reply(Query *q, int rcode) {
 
 static void *lookup(void *arg) {
     Query *q = arg;
+    if (atomic_load(&stopping)) {
+        free(q);
+        lookup_finished();
+        return NULL;
+    }
     DNSServiceRef ref = NULL;
     DNSServiceErrorType err = DNSServiceQueryRecord(&ref, kDNSServiceFlagsReturnIntermediates, 0, q->name, q->qtype,
                                                     q->qclass, on_record, q);
     if (err != kDNSServiceErr_NoError) {
-        q->send(q->frame, q->len, 0); /* libslirp, as before */
-        atomic_fetch_add(&handed_back, 1);
+        if (!atomic_load(&stopping)) {
+            q->send(q->frame, q->len, 0); /* libslirp, as before */
+            atomic_fetch_add(&handed_back, 1);
+        }
     } else {
         int fd = DNSServiceRefSockFD(ref);
         int64_t end = now_ms() + TIMEOUT_MS;
-        while (!q->done) {
+        while (!q->done && !atomic_load(&stopping)) {
             int64_t left = end - now_ms();
             if (left <= 0) break;
             struct pollfd p = {fd, POLLIN, 0};
-            int r = poll(&p, 1, (int)left);
+            int r = poll(&p, 1, (int)(left < 100 ? left : 100));
             if (r > 0 && DNSServiceProcessResult(ref) != kDNSServiceErr_NoError) {
                 q->failed = 1;
                 break;
             }
         }
         DNSServiceRefDeallocate(ref);
-        if (!q->done || q->failed) {
-            atomic_fetch_add(&timed_out, 1);
-            if (atomic_fetch_add(&unanswered_in_a_row, 1) + 1 == GIVE_UP && hv_knob[HV_K_DNSPROXY]) {
-                hv_knob[HV_K_DNSPROXY] = 0; /* not hv_knob_set: no translation depends on it */
-                fprintf(stderr, "hengevm: dns: %d lookups in a row unanswered by the system resolver: libslirp answers from now on\n", GIVE_UP);
+        if (!atomic_load(&stopping)) {
+            if (!q->done || q->failed) {
+                atomic_fetch_add(&timed_out, 1);
+                if (atomic_fetch_add(&unanswered_in_a_row, 1) + 1 == GIVE_UP && hv_knob[HV_K_DNSPROXY]) {
+                    hv_knob[HV_K_DNSPROXY] = 0; /* not hv_knob_set: no translation depends on it */
+                    fprintf(stderr, "hengevm: dns: %d lookups in a row unanswered by the system resolver: libslirp answers from now on\n", GIVE_UP);
+                }
+            } else {
+                atomic_store(&unanswered_in_a_row, 0);
             }
-        } else {
-            atomic_store(&unanswered_in_a_row, 0);
+            reply(q, q->done && !q->failed ? 0 : 2); /* SERVFAIL when nothing came */
+            atomic_fetch_add(&answered, 1);
         }
-        reply(q, q->done && !q->failed ? 0 : 2); /* SERVFAIL when nothing came */
-        atomic_fetch_add(&answered, 1);
     }
     free(q);
-    atomic_fetch_sub(&inflight, 1);
+    lookup_finished();
     return NULL;
 }
 
@@ -272,11 +308,14 @@ int hv_dns_proxy_take(const uint8_t *p, uint32_t len, HvDnsSend send) {
         free(q);
         return 0;
     }
-    if (atomic_fetch_add(&inflight, 1) >= MAX_INFLIGHT) {
-        atomic_fetch_sub(&inflight, 1);
+    pthread_mutex_lock(&lifecycle_mu);
+    if (atomic_load(&stopping) || atomic_load(&inflight) >= MAX_INFLIGHT) {
+        pthread_mutex_unlock(&lifecycle_mu);
         free(q);
         return 0;
     }
+    atomic_fetch_add(&inflight, 1);
+    pthread_mutex_unlock(&lifecycle_mu);
     memcpy(q->frame, p, 14 + iplen);
     q->len = 14 + iplen;
     q->ip_off = 14, q->udp_off = 14 + ihl, q->dns_off = 14 + ihl + 8, q->qend = q->dns_off + qend;
@@ -289,8 +328,8 @@ int hv_dns_proxy_take(const uint8_t *p, uint32_t len, HvDnsSend send) {
     int ok = pthread_create(&t, &at, lookup, q) == 0;
     pthread_attr_destroy(&at);
     if (!ok) {
-        atomic_fetch_sub(&inflight, 1);
         free(q);
+        lookup_finished();
         return 0;
     }
     return 1;

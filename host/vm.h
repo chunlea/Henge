@@ -32,6 +32,9 @@ typedef struct HvVmConfig {
 
 /* Returns 0, or -1 with a reason in err. */
 int hv_vm_create(const HvVmConfig *cfg, char *err, size_t errlen);
+/* After CPUs stop, detach backends and release the old machine. Borrowed iOS
+   JIT memory stays owned by the app and can be attached to the next machine. */
+void hv_vm_destroy(void);
 HvMachine *hv_vm_machine(void);
 HvVmapple *hv_vm_board(void);
 HvCpu *hv_vm_cpu(int index);
@@ -66,7 +69,8 @@ void hv_vm_set_poll(void (*poll)(void));
    CPUs and the 1 ms kicker. on_exit is called on CPU 0's thread when the
    machine stops (powered off, a fatal error, or hv_vm_stop), after the disks
    are flushed; reason is an HV_EXIT_* value. */
-void hv_vm_start(int cpu0, void (*on_exit)(int reason));
+/* Returns -1 if a thread could not start; already-started workers are joined. */
+int hv_vm_start(int cpu0, void (*on_exit)(int reason));
 /* Call on a thread before it runs guest code (hv_vm_start's threads do): see vm.c. */
 void hv_vm_prepare_cpu_thread(void);
 /* That, and the scheduling class the guest's CPUs run at. */
@@ -85,6 +89,12 @@ void hv_vm_mouse_move(int dx, int dy);
 void hv_vm_mouse_button(int button, int down); /* 0 left, 1 right, 2 middle */
 void hv_vm_mouse_wheel(int dy);
 void hv_vm_mouse_hwheel(int dx);
+/* The Magic Trackpad 2 on the USB bus: a finger on it. phase: 0 down, 1 move, 2 up; id a
+   stable 1..15 per touch; x, y in sensor units (HV_TP_SENSOR_* in devices/xhci.h).
+   ts_ms is the touch sample's own clock in ms (see hv_xhci_touch). */
+void hv_vm_touch(int id, int phase, int x, int y, uint32_t ts_ms);
+void hv_vm_touch_frame(uint32_t ts_ms); /* commit one frame with every finger that moved */
+void hv_vm_touch_button(int down); /* the pad's full press (a click) */
 /* Where the guest has its pointer, in display pixels. 0, or -1 before it has one. */
 int hv_vm_pointer(int *x, int *y);
 /* A small picture of the display, BGRA, width * height * 4 bytes. 0, or -1 before anything shows. */

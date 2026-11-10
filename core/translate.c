@@ -2093,9 +2093,8 @@ int hv_translate_place(HvMachine *m, HvBlock *b) {
         hv_jit_write(&m->jit, dst, e->hot, e->nhot * 4);
         hv_jit_write(&m->jit, cold, e->cold, e->pool_at * 4);
         hv_jit_write(&m->jit, cold + e->pool_at, e->pool, e->npool * 8);
-        hv_jit_finish(&m->jit, cold, e->ncold);
     }
-    hv_jit_finish(&m->jit, dst, e->nhot);
+    hv_jit_finish2(&m->jit, dst, e->nhot, e->flat ? NULL : cold, e->flat ? 0 : e->ncold); /* one wait for both parts */
     b->code = dst;
     for (uint32_t k = 0; k < e->nsite; k++) {
         m->slot_site[e->site[k].slot] = (e->site[k].cold ? cold : dst) + e->site[k].at;

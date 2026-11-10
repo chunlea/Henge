@@ -26,16 +26,26 @@
 static HvMachine m;
 static HvCpu cpus[HV_MAX_CPUS]; /* the board takes them as an array */
 static int ncpus = 1;
-static HvVmapple board;
+static HvVmapple board = {.ram_fd = -1};
+static _Atomic int input_stopping = 1;
+static void stop_pointer(void);
 /* UI display changes may arrive before or during the background machine creation. */
 static os_unfair_lock display_lock = OS_UNFAIR_LOCK_INIT;
 static CFTypeRef display_layer;
 static int display_layer_set;
 static _Atomic(HvPvgLite *) display_pvg; /* published only when the board is ready */
-static HvDisk disk, aux;
+static HvDisk disk = {.fd = -1, .wfd = -1}, aux = {.fd = -1, .wfd = -1};
+static int machine_created, signals_installed;
+static uint64_t boot_args_offset;
+static double boot_last_scan;
 static int net_on;
 static void (*extra_poll)(void);
 static void (*exit_cb)(int);
+static pthread_t secondary_threads[HV_MAX_CPUS], kicker;
+static int secondary_started[HV_MAX_CPUS], kicker_started;
+static _Atomic int kicker_stopped;
+static pthread_t primary_thread;
+static int primary_started;
 
 HvMachine *hv_vm_machine(void) { return &m; }
 HvVmapple *hv_vm_board(void) { return &board; }
@@ -88,23 +98,21 @@ int hv_vm_boot_display(HvBootDisplay *d) {
         d->width = fw, d->height = fh, d->stride = fw * 4;
         return 0;
     }
-    static uint64_t found; /* RAM offset of boot_args */
     uint8_t *ram = board.ram;
     uint64_t size = board.ram_size;
     if (!ram) return -1;
-    static double last_scan;
     for (int pass = 0; pass < 2; pass++) {
-        if (!found || pass) {
+        if (!boot_args_offset || pass) {
             /* A full scan at most every 2 s; boot_args sits low in RAM
                (iBoot puts it near 0x78ed0000), so the first GB is enough. */
             struct timespec ts;
             clock_gettime(CLOCK_MONOTONIC, &ts);
             double now = ts.tv_sec + ts.tv_nsec * 1e-9;
-            if (now - last_scan < 2) return -1;
-            last_scan = now;
-            if (pass && found) found = 0;
+            if (now - boot_last_scan < 2) return -1;
+            boot_last_scan = now;
+            if (pass && boot_args_offset) boot_args_offset = 0;
             uint64_t limit = size < (1ull << 30) ? size : 1ull << 30;
-            for (uint64_t off = 0; off + 0x1000 <= limit && !found; off += 0x4000) {
+            for (uint64_t off = 0; off + 0x1000 <= limit && !boot_args_offset; off += 0x4000) {
                 const uint64_t *q = (const uint64_t *)(ram + off);
                 const uint16_t *h = (const uint16_t *)(ram + off);
                 if (h[0] < 2 || h[0] > 3 || h[1] < 1 || h[1] > 3) continue; /* boot_args: revision, version */
@@ -112,11 +120,11 @@ int hv_vm_boot_display(HvBootDisplay *d) {
                 uint64_t base = q[5], row = q[7], w = q[8], hh = q[9], depth = q[10];
                 if (w < 320 || w > 8192 || hh < 200 || hh > 8192 || row < w * 4 || (depth & 0xff) != 32) continue;
                 if (base < VMAPPLE_MEM || base - VMAPPLE_MEM + row * hh > size) continue;
-                found = off;
+                boot_args_offset = off;
             }
         }
-        if (!found) return -1;
-        const uint64_t *q = (const uint64_t *)(ram + found);
+        if (!boot_args_offset) return -1;
+        const uint64_t *q = (const uint64_t *)(ram + boot_args_offset);
         uint64_t base = q[5], row = q[7], w = q[8], hh = q[9];
         if (q[1] >> 40 == 0xfffffe && w >= 320 && w <= 8192 && hh >= 200 && hh <= 8192 && base >= VMAPPLE_MEM &&
             base - VMAPPLE_MEM + row * hh <= size) {
@@ -259,14 +267,23 @@ uint64_t hv_vm_gpu_frames(void) {
 }
 
 int hv_vm_create(const HvVmConfig *c, char *err, size_t errlen) {
+    if (machine_created) return fail(err, errlen, "The previous machine has not been released.");
+    if (primary_started) {
+        pthread_join(primary_thread, NULL);
+        primary_started = 0;
+    }
     int linux_guest = c->linux_kernel != NULL || c->linux_from_disk;
     if (!linux_guest && (!c->rom || !c->disk || !c->aux))
         return fail(err, errlen, "The ROM, disk and auxiliary storage are all needed.");
+    machine_created = 1;
     struct sigaction ill = {.sa_flags = SA_SIGINFO | SA_ONSTACK};
     ill.sa_sigaction = on_ill;
-    sigaction(SIGILL, &ill, &prior_ill);
-    sigaction(SIGBUS, &ill, &prior_bus);
-    sigaction(SIGSEGV, &ill, &prior_segv);
+    if (!signals_installed) {
+        sigaction(SIGILL, &ill, &prior_ill);
+        sigaction(SIGBUS, &ill, &prior_bus);
+        sigaction(SIGSEGV, &ill, &prior_segv);
+        signals_installed = 1;
+    }
     signal(SIGPIPE, SIG_IGN); /* a guest connection closing at the far end must not end the machine */
     int have_disk = c->disk != NULL, have_aux = !linux_guest && c->aux;
     if (have_disk && hv_disk_open(&disk, c->disk, 0, 0) != 0) return fail(err, errlen, "Cannot open the disk image.");
@@ -329,12 +346,40 @@ int hv_vm_create(const HvVmConfig *c, char *err, size_t errlen) {
     if (display_layer_set && board.pvg) hv_pvg_lite_set_layer(board.pvg, (void *)display_layer);
     atomic_store_explicit(&display_pvg, board.pvg, memory_order_release);
     os_unfair_lock_unlock(&display_lock);
+    atomic_store(&input_stopping, 0);
     return 0;
+}
+
+void hv_vm_destroy(void) {
+    if (primary_started && !pthread_equal(primary_thread, pthread_self())) {
+        pthread_join(primary_thread, NULL);
+        primary_started = 0;
+    }
+    if (!machine_created) return;
+    /* The bridge excludes readers. Unpublish the display before draining
+       queued GPU work; completion callbacks still need the GIC and RAM. */
+    os_unfair_lock_lock(&display_lock);
+    atomic_store_explicit(&display_pvg, NULL, memory_order_release);
+    os_unfair_lock_unlock(&display_lock);
+    stop_pointer();
+    hv_net_detach();
+    net_on = 0;
+    hv_audio_detach();
+    hv_vmapple_destroy(&board);
+    hv_disk_close(&disk);
+    hv_disk_close(&aux);
+    hv_machine_free(&m);
+    memset(cpus, 0, sizeof cpus);
+    ncpus = 0;
+    boot_args_offset = 0;
+    boot_last_scan = 0;
+    extra_poll = NULL;
+    machine_created = 0;
 }
 
 static void *kicker_thread(void *unused) {
     (void)unused;
-    for (;;) {
+    while (!atomic_load(&kicker_stopped)) {
         usleep(1000);
         hv_machine_kick_all(&m);
     }
@@ -345,13 +390,26 @@ static void *kicker_thread(void *unused) {
    guest's SP, a guest address, so the kernel must never push a signal frame
    there: other threads take the asynchronous signals, and a handler that does
    run here (a fault) gets a stack of its own. */
+static pthread_key_t stack_key;
+static pthread_once_t stack_key_once = PTHREAD_ONCE_INIT;
+static void free_cpu_stack(void *memory) {
+    stack_t disabled = {.ss_flags = SS_DISABLE};
+    sigaltstack(&disabled, NULL);
+    free(memory);
+}
+static void make_stack_key(void) { pthread_key_create(&stack_key, free_cpu_stack); }
+
 void hv_vm_prepare_cpu_thread(void) {
     static __thread int done;
     if (done) return;
     done = 1;
     if (hv_prof_register) hv_prof_register();
     stack_t ss = {.ss_sp = malloc(1u << 16), .ss_size = 1u << 16, .ss_flags = 0};
-    if (ss.ss_sp) sigaltstack(&ss, NULL);
+    if (ss.ss_sp) {
+        sigaltstack(&ss, NULL);
+        pthread_once(&stack_key_once, make_stack_key);
+        pthread_setspecific(stack_key, ss.ss_sp);
+    }
     sigset_t set;
     sigfillset(&set);
     sigdelset(&set, SIGSEGV), sigdelset(&set, SIGBUS), sigdelset(&set, SIGILL), sigdelset(&set, SIGTRAP), sigdelset(&set, SIGFPE);
@@ -398,26 +456,57 @@ static void *cpu0_thread(void *unused) {
     (void)unused;
     hv_vm_cpu_qos();
     int r = hv_vm_run_cpu0();
+    /* Finish CPU activity before flushing or telling the UI the Mac stopped.
+       CPU 0 can also leave for a fatal execution error. */
+    hv_machine_halt(&m, HV_HALT_HOST);
+    atomic_store(&kicker_stopped, 1);
+    for (int i = 1; i < ncpus; i++)
+        if (secondary_started[i]) pthread_join(secondary_threads[i], NULL);
+    if (kicker_started) pthread_join(kicker, NULL);
+    kicker_started = 0;
+    memset(secondary_started, 0, sizeof secondary_started);
+    /* A DMA worker can still be writing after the guest CPUs have exited. */
+    hv_virtio_blk_stop(board.root_blk);
+    hv_virtio_blk_stop(board.aux_blk);
+    hv_audio_detach();
     hv_vm_flush_disks();
     if (exit_cb) exit_cb(r);
     return NULL;
 }
 
-void hv_vm_start(int cpu0, void (*on_exit)(int reason)) {
+int hv_vm_start(int cpu0, void (*on_exit)(int reason)) {
     exit_cb = on_exit;
     pthread_attr_t attr;
     pthread_attr_init(&attr);
     pthread_attr_setstacksize(&attr, 8u << 20);
-    pthread_t t;
-    if (cpu0) pthread_create(&t, &attr, cpu0_thread, NULL);
-    for (int i = 1; i < ncpus; i++) pthread_create(&t, &attr, secondary_thread, &cpus[i]);
-    pthread_create(&t, NULL, kicker_thread, NULL);
+    atomic_store(&kicker_stopped, 0);
+    /* Publish all join handles before CPU 0 can reach its exit callback. */
+    for (int i = 1; i < ncpus; i++) {
+        secondary_started[i] = pthread_create(&secondary_threads[i], &attr, secondary_thread, &cpus[i]) == 0;
+        if (!secondary_started[i]) goto failed;
+    }
+    kicker_started = pthread_create(&kicker, NULL, kicker_thread, NULL) == 0;
+    if (!kicker_started) goto failed;
+    if (cpu0) {
+        primary_started = pthread_create(&primary_thread, &attr, cpu0_thread, NULL) == 0;
+        if (!primary_started) goto failed;
+    }
+    pthread_attr_destroy(&attr);
+    return 0;
+failed:
+    pthread_attr_destroy(&attr);
+    hv_machine_halt(&m, HV_HALT_HOST);
+    atomic_store(&kicker_stopped, 1);
+    for (int i = 1; i < ncpus; i++)
+        if (secondary_started[i]) pthread_join(secondary_threads[i], NULL);
+    memset(secondary_started, 0, sizeof secondary_started);
+    if (kicker_started) pthread_join(kicker, NULL);
+    kicker_started = 0;
+    return -1;
 }
 
 void hv_vm_stop(void) {
-    for (int i = 0; i < ncpus; i++) cpus[i].halted = 3; /* the dispatchers stop at the next block */
-    hv_machine_kick_all(&m);
-    for (int i = 0; i < ncpus; i++) hv_cpu_wake(&cpus[i]);
+    hv_machine_halt(&m, HV_HALT_HOST);
 }
 
 /* macOS's virtio mouse driver drops BTN_RIGHT, so the right button is a Control-click, with the right
@@ -448,6 +537,18 @@ static void key_linux(uint16_t code, int down) {
     }
 }
 
+static void stop_pointer(void) {
+    atomic_store(&input_stopping, 1);
+    /* The bridge excludes new input. Finish a click already in progress and
+       discard queued input before releasing the keyboard and mouse. */
+    dispatch_sync(pointer_queue(), ^{
+        left_user = left_click = left_sent = 0;
+        os_unfair_lock_lock(&rctrl_lock);
+        rctrl_user = rctrl_click = 0;
+        os_unfair_lock_unlock(&rctrl_lock);
+    });
+}
+
 static void rctrl_hold(int *owner, int down) {
     os_unfair_lock_lock(&rctrl_lock);
     *owner = down;
@@ -468,6 +569,7 @@ void hv_vm_key_hid(uint8_t usage, int down) {
 }
 
 static void move_now(void *ctx) {
+    if (atomic_load(&input_stopping)) return;
     int64_t packed = (int64_t)(intptr_t)ctx;
     int32_t dx = (int32_t)(packed >> 32), dy = (int32_t)packed;
     if (dx) hv_virtio_input_send(board.mouse, HV_EV_REL, HV_REL_X, dx);
@@ -489,6 +591,7 @@ static void left_update(void) {
 }
 
 static void button_now(void *ctx) {
+    if (atomic_load(&input_stopping)) return;
     intptr_t v = (intptr_t)ctx;
     int button = (int)(v >> 1), down = (int)(v & 1);
     if (button == 0) {
@@ -528,6 +631,18 @@ static void wheel(uint16_t axis, int amount) {
 
 void hv_vm_mouse_wheel(int dy) { wheel(HV_REL_WHEEL, dy); }
 void hv_vm_mouse_hwheel(int dx) { wheel(HV_REL_HWHEEL, dx); }
+
+void hv_vm_touch(int id, int phase, int x, int y, uint32_t ts_ms) {
+    if (x < 0) x = 0;
+    if (x > HV_TP_SENSOR_X) x = HV_TP_SENSOR_X;
+    if (y < 0) y = 0;
+    if (y > HV_TP_SENSOR_Y) y = HV_TP_SENSOR_Y;
+    hv_xhci_touch(board.usb, id, phase, x, y, ts_ms);
+}
+
+void hv_vm_touch_frame(uint32_t ts_ms) { hv_xhci_touch_frame(board.usb, ts_ms); }
+
+void hv_vm_touch_button(int down) { hv_xhci_touch_button(board.usb, down); }
 
 int hv_vm_pointer(int *x, int *y) {
     HvPvgLite *pvg = atomic_load_explicit(&display_pvg, memory_order_acquire);

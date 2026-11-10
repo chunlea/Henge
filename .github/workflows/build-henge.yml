@@ -13,11 +13,9 @@
 
 name: Build Henge IPA
 
+# Manual only (Actions tab > Build Henge IPA > Run workflow): pushes to main don't build an IPA.
 on:
   workflow_dispatch: {}
-  push:
-    branches:
-      - '**'
 
 env:
   HUSK: ${{ github.workspace }}/Husk

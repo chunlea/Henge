@@ -42,6 +42,7 @@ typedef struct HvVirtioBlk {
     pthread_mutex_t mu;
     pthread_cond_t cv;
     pthread_t worker[HV_VBLK_WORKERS];
+    int stopping, workers_started;
 } HvVirtioBlk;
 
 HvVirtioBlk *hv_virtio_blk_create(HvMachine *m, HvPcie *bus, HvDisk *disk, int apple_variant);
@@ -49,5 +50,8 @@ HvVirtioBlk *hv_virtio_blk_create(HvMachine *m, HvPcie *bus, HvDisk *disk, int a
 void hv_virtio_blk_poll(HvVirtioBlk *b);
 /* Tests: wait for the worker to finish everything submitted, then publish it. */
 void hv_virtio_blk_drain(HvVirtioBlk *b);
+/* After CPUs stop: finish submitted DMA and join workers before disk flush/free. */
+void hv_virtio_blk_stop(HvVirtioBlk *b);
+void hv_virtio_blk_destroy(HvVirtioBlk *b);
 
 #endif

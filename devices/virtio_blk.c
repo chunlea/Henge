@@ -118,7 +118,13 @@ static void *worker(void *opaque) {
     uint64_t t_last = now_us(), busy = 0, reqs = 0, bytes = 0, flushes = 0, flush_us = 0;
     for (;;) {
         pthread_mutex_lock(&b->mu);
-        while (b->fence || b->claimed == __atomic_load_n(&b->submitted, __ATOMIC_ACQUIRE)) pthread_cond_wait(&b->cv, &b->mu);
+        while (b->fence || b->claimed == __atomic_load_n(&b->submitted, __ATOMIC_ACQUIRE)) {
+            if (b->stopping && !b->fence && b->claimed == b->submitted) {
+                pthread_mutex_unlock(&b->mu);
+                return NULL;
+            }
+            pthread_cond_wait(&b->cv, &b->mu);
+        }
         HvVblkReq *r = &b->ring[b->claimed % HV_VBLK_RING];
         uint32_t type = 0;
         hv_virtq_read(&b->vio, &r->e, 0, &type, 4);
@@ -191,6 +197,26 @@ void hv_virtio_blk_drain(HvVirtioBlk *b) {
     hv_virtio_blk_poll(b);
 }
 
+void hv_virtio_blk_stop(HvVirtioBlk *b) {
+    if (!b) return;
+    pthread_mutex_lock(&b->mu);
+    b->stopping = 1;
+    pthread_cond_broadcast(&b->cv);
+    pthread_mutex_unlock(&b->mu);
+    for (int i = 0; i < b->workers_started; i++) pthread_join(b->worker[i], NULL);
+    b->workers_started = 0;
+}
+
+void hv_virtio_blk_destroy(HvVirtioBlk *b) {
+    if (!b) return;
+    hv_virtio_blk_stop(b);
+    pthread_mutex_destroy(&b->mu);
+    pthread_cond_destroy(&b->cv);
+    pthread_cond_destroy(&b->done_cv);
+    free(b->ring);
+    free(b);
+}
+
 /* CPU thread: hand finished requests back, in whatever order they finished;
    a slot is reused once it and every slot before it are back. */
 void hv_virtio_blk_poll(HvVirtioBlk *b) {
@@ -217,6 +243,7 @@ void hv_virtio_blk_poll(HvVirtioBlk *b) {
 
 HvVirtioBlk *hv_virtio_blk_create(HvMachine *m, HvPcie *bus, HvDisk *disk, int apple_variant) {
     HvVirtioBlk *b = calloc(1, sizeof *b);
+    if (!b) return NULL;
     HvVirtio *v = &b->vio;
     hv_virtio_init(v, m, 2, 0x010000, 1, F_SEG_MAX | F_BLK_SIZE | F_FLUSH | (disk->readonly ? F_RO : 0));
     v->dev = b;
@@ -226,7 +253,12 @@ HvVirtioBlk *hv_virtio_blk_create(HvMachine *m, HvPcie *bus, HvDisk *disk, int a
     pthread_mutex_init(&b->mu, NULL);
     pthread_cond_init(&b->cv, NULL);
     pthread_cond_init(&b->done_cv, NULL);
-    for (int i = 0; i < HV_VBLK_WORKERS; i++) pthread_create(&b->worker[i], NULL, worker, b);
+    if (!b->ring) { hv_virtio_blk_destroy(b); return NULL; }
+    for (int i = 0; i < HV_VBLK_WORKERS; i++) {
+        if (pthread_create(&b->worker[i], NULL, worker, b) != 0) break;
+        b->workers_started++;
+    }
+    if (!b->workers_started) { hv_virtio_blk_destroy(b); return NULL; }
     uint64_t capacity = disk->size / 512;
     /* Apple's driver takes one descriptor per segment from the queue's 256
        and does not use indirect tables: with segments up to 126, two big

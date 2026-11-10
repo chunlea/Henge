@@ -10,6 +10,10 @@
 typedef void (*HvDnsSend)(const uint8_t *frame, uint32_t len, int to_guest);
 
 int hv_dns_proxy_on(void);
+/* Start a fresh network session, or stop and wait for every lookup callback.
+   The caller keeps its send queues alive until stop returns. */
+void hv_dns_proxy_start(void);
+void hv_dns_proxy_stop(void);
 /* A frame the guest sent: 1 if it was a DNS query this took (its answer comes through send), 0 to pass it on. */
 int hv_dns_proxy_take(const uint8_t *frame, uint32_t len, HvDnsSend send);
 void hv_dns_proxy_stats(uint64_t *answered, uint64_t *handed_back, uint64_t *timed_out);

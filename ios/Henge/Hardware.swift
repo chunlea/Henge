@@ -171,7 +171,8 @@ final class HardwareMouse {
 
     private var observers: [NSObjectProtocol] = []
     private var mice: [GCMouse] = []
-    private var buttonsDown: Set<Int32> = []
+    private var buttons = PhysicalMouseButtons(swapsRightAndMiddle: false)
+    private var buttonsLogged = 0
     private var restX: Float = 0, restY: Float = 0
     private var speed: Float = 1
     private var reverse = false
@@ -182,6 +183,11 @@ final class HardwareMouse {
         let defaults = UserDefaults.standard
         speed = defaults.object(forKey: Self.speedKey) == nil ? 1 : Float(defaults.double(forKey: Self.speedKey))
         reverse = defaults.bool(forKey: Self.reverseKey)
+        releaseButtons()
+        let swapButtons = defaults.bool(forKey: PhysicalMouseButtons.swapKey)
+        buttons = PhysicalMouseButtons(swapsRightAndMiddle: swapButtons)
+        buttonsLogged = 0
+        HengeLog.log("input", "physical mouse: swap right/middle \(swapButtons ? "on" : "off")")
         lastScrollFirst = 0
         lastScrollSecond = 0
         GCMouse.mice().forEach(attach)
@@ -219,8 +225,7 @@ final class HardwareMouse {
     }
 
     func releaseButtons() {
-        for button in buttonsDown { henge_vm_mouse_button(button, 0) }
-        buttonsDown.removeAll()
+        for button in buttons.releaseAll() { henge_vm_mouse_button(button, 0) }
     }
 
     private func attach(_ mouse: GCMouse) {
@@ -245,14 +250,14 @@ final class HardwareMouse {
         henge_vm_mouse_move(Int32(x), Int32(y))
     }
 
-    private func button(_ button: Int32, _ pressed: Bool) {
-        henge_vm_mouse_button(button, pressed ? 1 : 0)
-        if pressed {
-            buttonsDown.insert(button)
-        } else {
-            buttonsDown.remove(button)
-            StickyKeys.shared.releaseAll()
+    private func button(_ physicalButton: Int32, _ pressed: Bool) {
+        guard let guestButton = buttons.event(physicalButton, pressed: pressed) else { return }
+        if buttonsLogged < 32 {
+            buttonsLogged += 1
+            HengeLog.log("input", "physical mouse button: raw=\(physicalButton) guest=\(guestButton) \(pressed ? "down" : "up")")
         }
+        henge_vm_mouse_button(guestButton, pressed ? 1 : 0)
+        if !pressed { StickyKeys.shared.releaseAll() }
     }
 
     /// GameController puts vertical motion on the first axis and horizontal on the second.

@@ -5,7 +5,9 @@
    unstripped binary: tools/prof_symbolize.sh). Every HV_PROF_IOS_SECS seconds
    (default 30) the totals go to stderr, which Henge mirrors to henge-native.log.
    Off unless HV_PROF_IOS is set (Documents/henge-env.txt can set it): reading a running
-   thread's PC stops it for a moment, so sampling is not free. */
+   thread's PC stops it for a moment, so sampling is not free. HV_PROF_IOS=2 also counts the
+   instruction word under each translated-code sample and appends them to Documents/hvprof-words.txt
+   at every dump as "p COUNT 0 WORD" lines (the Mac's scratch hot2.py reads them). */
 #include <dlfcn.h>
 #include <mach/mach.h>
 #include <pthread.h>
@@ -13,6 +15,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 #include "../core/machine.h"
 #include "vm.h"
@@ -26,6 +29,36 @@ static _Atomic int nthreads;
 static struct { uintptr_t off; uint32_t n; } slots[SLOTS];
 static uint64_t total, idle, jit, other_image, unknown;
 static uintptr_t image_base;
+static int words_on;
+
+/* HV_PROF_IOS=2: the translated instruction under each JIT sample, by its encoding */
+#define WORD_SLOTS 16384
+static struct { uint32_t w, n; } words[WORD_SLOTS];
+static uint64_t words_lost;
+
+static void count_word(uint32_t w) {
+    uint32_t h = (w * 2654435761u) % WORD_SLOTS;
+    for (int k = 0; k < 64; k++, h = (h + 1) % WORD_SLOTS) {
+        if (words[h].n && words[h].w == w) { words[h].n++; return; }
+        if (!words[h].n) { words[h].w = w, words[h].n = 1; return; }
+    }
+    words_lost++;
+}
+
+static void dump_words(void) {
+    const char *home = getenv("HOME");
+    char path[1024];
+    snprintf(path, sizeof path, "%s/Documents/hvprof-words.txt", home ? home : ".");
+    FILE *f = fopen(path, "a");
+    if (f) {
+        fprintf(f, "# dump at %ld jit %llu lost %llu\n", (long)time(NULL), (unsigned long long)jit, (unsigned long long)words_lost);
+        for (int i = 0; i < WORD_SLOTS; i++)
+            if (words[i].n) fprintf(f, "p %u 0 %08x\n", words[i].n, words[i].w);
+        fclose(f);
+    }
+    memset(words, 0, sizeof words);
+    words_lost = 0;
+}
 
 static void reg(void) {
     int i = atomic_fetch_add(&nthreads, 1);
@@ -83,6 +116,7 @@ static void dump(void) {
     qsort(osorted, OTHER_SLOTS, sizeof osorted[0], by_count_other);
     for (int i = 0; i < 12 && osorted[i].n; i++)
         fprintf(stderr, "hvprof: %5.2f%% %s (other image)\n", busy ? 100.0 * osorted[i].n / busy : 0, osorted[i].name ? osorted[i].name : "?");
+    if (words_on) dump_words();
     memset(other, 0, sizeof other);
     memset(slots, 0, sizeof slots);
     total = idle = jit = other_image = unknown = 0;
@@ -107,8 +141,10 @@ static void *sampler(void *unused) {
             mach_msg_type_number_t sn = ARM_THREAD_STATE64_COUNT;
             if (thread_get_state(threads[i], ARM_THREAD_STATE64, (thread_state_t)&st, &sn) != KERN_SUCCESS) { unknown++; continue; }
             uintptr_t pc = (uintptr_t)arm_thread_state64_get_pc(st);
-            if (pc >= lo && pc < hi) jit++;
-            else count_host(pc);
+            if (pc >= lo && pc < hi) {
+                jit++;
+                if (words_on) count_word(*(const volatile uint32_t *)(pc + (uintptr_t)m->jit.rw_diff)); /* the writable alias: always readable */
+            } else count_host(pc);
         }
         if (++ticks % (uint64_t)(secs * 1000) == 0) dump();
     }
@@ -119,6 +155,7 @@ void hv_prof_ios_start(void) {
     static int started;
     if (started++) return;
     if (!getenv("HV_PROF_IOS")) return;
+    words_on = atoi(getenv("HV_PROF_IOS")) >= 2;
     Dl_info info;
     if (dladdr((void *)hv_prof_ios_start, &info)) image_base = (uintptr_t)info.dli_fbase;
     hv_prof_register = reg;

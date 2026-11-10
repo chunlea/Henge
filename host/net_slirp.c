@@ -16,6 +16,7 @@
 #include <fcntl.h>
 #include <poll.h>
 #include <pthread.h>
+#include <stdatomic.h>
 #include <libslirp.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -50,7 +51,10 @@ static Slirp *slirp;
 static HvVirtioNet *net;
 static HvMachine *machine;
 static Queue to_guest, to_host;
-static int wake_pipe[2];
+static int wake_pipe[2] = {-1, -1};
+static pthread_t network_thread;
+static int thread_started, queues_initialized;
+static _Atomic int stopping;
 static Timer timers[MAX_TIMERS];
 static struct pollfd pfds[MAX_POLL];
 static int npfd;
@@ -197,7 +201,7 @@ static const SlirpCb callbacks = {
 
 static void *net_thread(void *unused) {
     (void)unused;
-    for (;;) {
+    while (!atomic_load(&stopping)) {
         uint32_t timeout = 1000;
         int64_t now = now_ms();
         for (int i = 0; i < MAX_TIMERS; i++)
@@ -276,10 +280,15 @@ void hv_net_poll(void) {
 }
 
 int hv_net_attach(HvMachine *m, HvVirtioNet *n) {
+    if (machine) return -1;
     machine = m;
+    atomic_store(&stopping, 0);
+    hv_dns_proxy_start();
+    hv_net_tx_frames = hv_net_rx_frames = 0;
     pthread_mutex_init(&to_guest.mu, NULL);
     pthread_mutex_init(&to_host.mu, NULL);
-    if (pipe(wake_pipe) != 0) return -1;
+    queues_initialized = 1;
+    if (pipe(wake_pipe) != 0) { hv_net_detach(); return -1; }
     fcntl(wake_pipe[0], F_SETFL, O_NONBLOCK);
     fcntl(wake_pipe[1], F_SETFL, O_NONBLOCK);
     SlirpConfig cfg;
@@ -295,7 +304,7 @@ int hv_net_attach(HvMachine *m, HvVirtioNet *n) {
     cfg.if_mtu = 1500;
     cfg.if_mru = 1500;
     slirp = slirp_new(&cfg, &callbacks, NULL);
-    if (!slirp) return -1;
+    if (!slirp) { hv_net_detach(); return -1; }
     if (getenv("HV_NET_FWD")) { /* debugging: "hostport:guestport", from this Mac's loopback into the guest */
         int hp, gp;
         struct in_addr h, g;
@@ -312,7 +321,38 @@ int hv_net_attach(HvMachine *m, HvVirtioNet *n) {
     }
     net = n;
     n->transmit = transmit;
-    pthread_t t;
-    pthread_create(&t, NULL, net_thread, NULL);
+    if (pthread_create(&network_thread, NULL, net_thread, NULL) != 0) { hv_net_detach(); return -1; }
+    thread_started = 1;
     return 0;
+}
+
+void hv_net_detach(void) {
+    atomic_store(&stopping, 1);
+    hv_dns_proxy_stop();
+    if (thread_started) {
+        char byte = 0;
+        (void)!write(wake_pipe[1], &byte, 1);
+        pthread_join(network_thread, NULL);
+        thread_started = 0;
+    }
+    if (net) net->transmit = NULL;
+    if (slirp) slirp_cleanup(slirp);
+    slirp = NULL;
+    if (queues_initialized) {
+        Queue *queues[] = {&to_guest, &to_host};
+        for (int i = 0; i < 2; i++) {
+            Queue *q = queues[i];
+            while (q->head != q->tail) free(q->f[q->head++ % QUEUE].data);
+            pthread_mutex_destroy(&q->mu);
+            memset(q, 0, sizeof *q);
+        }
+        queues_initialized = 0;
+    }
+    for (int i = 0; i < 2; i++) {
+        if (wake_pipe[i] >= 0) close(wake_pipe[i]);
+        wake_pipe[i] = -1;
+    }
+    memset(timers, 0, sizeof timers);
+    net = NULL;
+    machine = NULL;
 }
