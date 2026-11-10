@@ -20,6 +20,10 @@ enum {
     CMD_RESOURCE_DETACH_BACKING,
     CMD_GET_CAPSET_INFO,
     CMD_GET_CAPSET,
+    CMD_GET_EDID,
+    CMD_RESOURCE_ASSIGN_UUID,
+    CMD_RESOURCE_CREATE_BLOB,
+    CMD_SET_SCANOUT_BLOB,
     CMD_CTX_CREATE = 0x0200,
     CMD_CTX_DESTROY,
     CMD_CTX_ATTACH_RESOURCE,
@@ -28,12 +32,17 @@ enum {
     CMD_TRANSFER_TO_HOST_3D,
     CMD_TRANSFER_FROM_HOST_3D,
     CMD_SUBMIT_3D,
+    CMD_RESOURCE_MAP_BLOB,
+    CMD_RESOURCE_UNMAP_BLOB,
     CMD_UPDATE_CURSOR = 0x0300,
     CMD_MOVE_CURSOR,
     RESP_OK_NODATA = 0x1100,
     RESP_OK_DISPLAY_INFO,
     RESP_OK_CAPSET_INFO,
     RESP_OK_CAPSET,
+    RESP_OK_EDID,
+    RESP_OK_RESOURCE_UUID,
+    RESP_OK_MAP_INFO,
     RESP_ERR_UNSPEC = 0x1200,
     RESP_ERR_OUT_OF_MEMORY,
     RESP_ERR_INVALID_SCANOUT_ID,
@@ -42,6 +51,16 @@ enum {
     RESP_ERR_INVALID_PARAMETER,
 };
 #define FLAG_FENCE 1u
+#define FLAG_RING_IDX 2u /* the fence is on one of the context's own timelines (ring_idx) */
+/* Feature bits. */
+#define GPU_F_VIRGL 1ull
+#define GPU_F_EDID 2ull
+#define GPU_F_RESOURCE_BLOB 8ull
+#define GPU_F_CONTEXT_INIT 16ull
+#define CAPSET_NEPTUNE 7 /* UTM's Direct3D-over-virtio protocol (virglrenderer's src/neptune) */
+/* The largest picture a scanout may be (the display buffer of a device whose guest chooses the size). */
+#define GPU_MAX_W 3840u
+#define GPU_MAX_H 2400u
 #define MAX_SCANOUTS 16
 
 /* Formats. */

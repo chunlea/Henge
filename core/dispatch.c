@@ -954,6 +954,12 @@ static int run_loop(HvCpu *cpu, int one) {
             prev_b = NULL;
             continue;
         }
+        uint32_t epoch = __atomic_load_n(&m->tlb_epoch, __ATOMIC_ACQUIRE);
+        if (epoch != cpu->tlb_epoch_seen) { /* pages were taken from a paged region: nothing is kept of them */
+            hv_tlb_flush(cpu);
+            __atomic_store_n(&cpu->tlb_epoch_seen, epoch, __ATOMIC_RELEASE);
+            pending_chain = NULL;
+        }
         hv_cpu_process_requests(cpu);
         if (cpu->halted) return HV_EXIT_HALT;
         if (cpu->off) {

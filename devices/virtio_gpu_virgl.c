@@ -17,8 +17,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/mman.h>
 #include <sys/uio.h>
 #include <time.h>
+#include <unistd.h>
+#include <mach/mach.h>
+#include <mach/mach_vm.h>
 
 #include "virtio_gpu_priv.h"
 
@@ -41,6 +45,18 @@ struct virgl_renderer_callbacks {
 };
 #define VIRGL_RENDERER_USE_GLES (1 << 4)
 #define VIRGL_RENDERER_NATIVE_SHARE_TEXTURE (1 << 12) /* scanout resources as Metal textures (what UTM uses) */
+#define VIRGL_RENDERER_RENDER_SERVER (1 << 9)        /* contexts of the newer protocols run in a render server */
+#define VIRGL_RENDERER_NEPTUNE (1 << 15)             /* UTM's fork: Direct3D calls forwarded (src/neptune) */
+#define VIRGL_RENDERER_FENCE_FLAG_MERGEABLE 1
+#define VIRGL_NATIVE_HANDLE_METAL_TEXTURE 2
+struct virgl_renderer_resource_create_blob_args {
+    uint32_t res_handle, ctx_id, blob_mem, blob_flags;
+    uint64_t blob_id, size;
+    const struct iovec *iovecs;
+    uint32_t num_iovs;
+};
+#define BLOB_MEM_GUEST 1
+#define BLOB_MEM_HOST3D 2
 #define PIPE_TEXTURE_2D 2
 #define PIPE_BIND_RENDER_TARGET (1 << 1)
 #define VIRGL_BIND_SCANOUT (1 << 18)
@@ -73,7 +89,20 @@ static struct {
     void (*cleanup)(void *); /* optional */
     int (*resource_get_info)(int, struct virgl_renderer_resource_info *);
     void (*force_ctx_0)(void);
+    /* a Direct3D device's (hv_virtio_gpu_create_d3d) */
+    int (*context_create_with_flags)(uint32_t, uint32_t, uint32_t, const char *);
+    int (*resource_create_blob)(const struct virgl_renderer_resource_create_blob_args *);
+    int (*resource_map)(uint32_t, void **, uint64_t *);
+    int (*resource_unmap)(uint32_t);
+    int (*resource_map_fixed)(uint32_t, void *);
+    int (*resource_get_map_info)(uint32_t, uint32_t *);
+    int (*context_create_fence)(uint32_t, uint32_t, uint32_t, uint64_t);
+    int (*create_handle_for_scanout)(uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, void **);
+    void (*release_handle_for_scanout)(int, void *);
+    void (*reset)(void);
 } vr;
+
+int hv_metal_texture_read(void *texture, uint32_t *out, uint32_t max_w, uint32_t max_h, uint32_t *w, uint32_t *h); /* virtio_gpu_metal.m */
 
 /* --- EGL (ANGLE), what is used of it --- */
 typedef void *EGLDisplay, *EGLConfig, *EGLContext;
@@ -153,6 +182,11 @@ typedef struct Req {
     uint32_t written;
     int fenced;              /* waits for fence before it is done */
     uint32_t fence;
+    int ringed;              /* the fence is on a context's timeline: ctx, ring, fence64 */
+    uint32_t ctx;
+    uint8_t ring;
+    uint64_t fence64;
+    uint32_t epoch;          /* which life of the device it was queued in (a reset starts another) */
     int done, pushed;
 } Req;
 
@@ -161,6 +195,15 @@ typedef struct Res {
     struct iovec *iov;       /* its backing, guest RAM */
     int niov;
     struct { uint64_t addr; uint32_t len; } *ents;
+    /* A blob: memory of a size, the guest's or the host's. A host blob may be mapped into the shared region. */
+    int blob;
+    uint32_t blob_mem;
+    uint64_t blob_size;
+    int mapped;              /* its pages are in the shared region, from map_off */
+    uint64_t map_off, map_len;
+    /* As a scanout (SET_SCANOUT_BLOB): the picture's layout in the blob, and virglrenderer's texture of it. */
+    uint32_t sw, sh, sformat, sstride, soffset;
+    void *tex;
     struct Res *next;
 } Res;
 
@@ -191,7 +234,15 @@ struct HvGpuVirgl {
     uint32_t surf_w, surf_h;
     int back, front;                      /* front: -1 until a frame is there */
     char dir[1024];
+    /* A Direct3D device's. */
+    uint32_t capset[4];
+    uint32_t ncapsets;
+    uint32_t epoch;                       /* bumped by each reset of the device */
+    int reset_req;                        /* the worker is to let go of everything when it reaches reset_at */
+    uint32_t reset_at;
 };
+
+static void hostmem_unmap(HvGpuVirgl *v, Res *r);
 
 static void *load(const char *dir, const char *rel, int global) {
     char path[1200];
@@ -216,10 +267,28 @@ static int cb_make_current(void *cookie, int scanout, void *ctx) {
 }
 static void *cb_egl_display(void *cookie) { return ((HvGpuVirgl *)cookie)->dpy; }
 static void cb_write_fence(void *cookie, uint32_t fence) { ((HvGpuVirgl *)cookie)->last_fence = fence; }
+/* A fence on a context's timeline has passed (from virgl_renderer_poll, on the worker): the requests that
+   waited for it or an earlier one on that timeline are done. */
+static void cb_write_context_fence(void *cookie, uint32_t ctx_id, uint32_t ring_idx, uint64_t fence_id) {
+    HvGpuVirgl *v = cookie;
+    int any = 0;
+    for (uint32_t i = v->published; i != v->taken; i++) {
+        Req *q = &v->ring[i % RING];
+        if (!q->fenced || !q->ringed || q->done || q->ctx != ctx_id || q->ring != ring_idx || q->fence64 > fence_id) continue;
+        __atomic_store_n(&q->done, 1, __ATOMIC_RELEASE);
+        any = 1;
+    }
+    if (any) hv_machine_wake(v->g->m);
+}
+static int cb_server_fd(void *cookie, uint32_t version) {
+    (void)cookie, (void)version;
+    return -1; /* none of ours: virglrenderer starts its render server itself */
+}
 
 static struct virgl_renderer_callbacks callbacks = {
     .version = 4, .write_fence = cb_write_fence, .create_gl_context = cb_create_context,
     .destroy_gl_context = cb_destroy_context, .make_current = cb_make_current, .get_egl_display = cb_egl_display,
+    .write_context_fence = cb_write_context_fence, .get_server_fd = cb_server_fd,
 };
 
 static void virgl_log(int level, const char *msg, void *data) {
@@ -272,9 +341,39 @@ static int bring_up(HvGpuVirgl *v) {
     if (!v->main_ctx || !egl.MakeCurrent(v->dpy, NULL, NULL, v->main_ctx)) { fprintf(stderr, "hengevm: virgl: no GLES 3 context\n"); return -1; }
     void (*set_log)(void (*)(int, const char *, void *), void *, void (*)(void *)) = dlsym(r, "virgl_set_log_callback");
     if (set_log && getenv("VREND_DEBUG")) set_log(virgl_log, NULL, NULL);
-    int rc = vr.init(v, VIRGL_RENDERER_USE_GLES | VIRGL_RENDERER_NATIVE_SHARE_TEXTURE, &callbacks);
+    int flags = VIRGL_RENDERER_USE_GLES | VIRGL_RENDERER_NATIVE_SHARE_TEXTURE;
+    if (v->g->d3d) {
+        /* Direct3D: the guest's calls are carried out by dxmt-native (Direct3D 11 on Metal), in virglrenderer's
+           render server: a process of its own on a Mac (UTM's, beside the frameworks), a thread on iOS. */
+        char path[1300];
+        snprintf(path, sizeof path, "%s/dxmt-native.framework/dxmt-native", d);
+        setenv("NPT_D3D11_LIBRARY_PATH", path, 0), setenv("NPT_DXGI_LIBRARY_PATH", path, 0), setenv("NPT_D3D12_LIBRARY_PATH", path, 0);
+        setenv("NPT_BACKEND", "dxmt", 0);
+        snprintf(path, sizeof path, "%s/../macos-server/Contents/XPCServices/QEMUHelper.xpc/Contents/MacOS/QEMURenderServer.app/Contents/MacOS/QEMURenderServer", d);
+        if (access(path, X_OK) == 0) setenv("RENDER_SERVER_EXEC_PATH", path, 0);
+        flags |= VIRGL_RENDERER_NEPTUNE | VIRGL_RENDERER_RENDER_SERVER;
+#define VO(n) *(void **)&vr.n = dlsym(r, "virgl_renderer_" #n);
+        VO(context_create_with_flags) VO(resource_create_blob) VO(resource_map) VO(resource_unmap) VO(resource_map_fixed)
+        VO(resource_get_map_info) VO(context_create_fence) VO(create_handle_for_scanout) VO(release_handle_for_scanout) VO(reset)
+#undef VO
+        if (!vr.context_create_with_flags || !vr.resource_create_blob || !vr.resource_map || !vr.context_create_fence) {
+            fprintf(stderr, "hengevm: virgl: this virglrenderer has no blob resources\n");
+            return -1;
+        }
+        v->present = 0; /* the picture is read into the device's own display buffer */
+    }
+    int rc = vr.init(v, flags, &callbacks);
     if (rc) { fprintf(stderr, "hengevm: virgl: virgl_renderer_init failed (%d)\n", rc); return -1; }
     fprintf(stderr, "hengevm: virgl: up, EGL %d.%d (ANGLE)\n", major, minor);
+    if (v->g->d3d) {
+        static const uint32_t ids[] = {1, 2, CAPSET_NEPTUNE};
+        for (unsigned i = 0; i < 3; i++) {
+            uint32_t ver = 0, size = 0;
+            vr.get_cap_set(ids[i], &ver, &size);
+            if (size) v->capset[v->ncapsets++] = ids[i];
+            if (ids[i] == CAPSET_NEPTUNE) fprintf(stderr, "hengevm: virgl: Direct3D (Neptune) %s\n", size ? "is there" : "is NOT there: no backend library?");
+        }
+    }
     return 0;
 }
 
@@ -299,6 +398,8 @@ static void unref(HvGpuVirgl *v, uint32_t id) {
             Res *r = *p;
             *p = r->next;
             detach(v, r);
+            hostmem_unmap(v, r);
+            if (r->tex && vr.release_handle_for_scanout) vr.release_handle_for_scanout(VIRGL_NATIVE_HANDLE_METAL_TEXTURE, r->tex);
             vr.resource_unref(id);
             if (v->scanout_res == id) v->scanout_res = 0;
             free(r);
@@ -536,6 +637,120 @@ int hv_gpu_virgl_read(HvGpuVirgl *v, uint32_t *out, uint32_t w, uint32_t h) {
     return 1;
 }
 
+/* ---- a Direct3D device: blobs in the shared memory region, the display's EDID, a blob as the scanout ---- */
+
+/* A host blob into the guest: the pages of the shared region from off are the blob's memory. The region is a
+   paged RAM region of the machine at the BAR's address (added the first time, when the driver has placed the
+   BAR): the guest's driver places blobs at any multiple of its 4 KB pages, the host's pages are 16 KB, and so
+   each 4 KB page is given the place in virglrenderer's own mapping of the blob that it stands for. */
+static uint32_t hostmem_map(HvGpuVirgl *v, Res *r, uint64_t off, uint32_t *map_info) {
+    HvVirtioGpu *g = v->g;
+    uint64_t len = (r->blob_size + 0xfff) & ~0xfffull;
+    if (!r->blob || r->mapped || !len || (off & 0xfff) || off > g->hostmem_size || len > g->hostmem_size - off) {
+        fprintf(stderr, "hengevm: virtio-gpu: blob %u (%llu bytes) cannot be mapped at %#llx of the shared region\n", r->id,
+                (unsigned long long)r->blob_size, (unsigned long long)off);
+        return RESP_ERR_INVALID_PARAMETER;
+    }
+    uint64_t bar = hv_pci_bar_addr(&g->vio.pci, 2);
+    if (!g->hostmem_ram) {
+        if (!bar || !(g->hostmem_ram = hv_machine_add_paged_ram(g->m, bar, g->hostmem_size))) return RESP_ERR_UNSPEC;
+        g->hostmem_pa = bar;
+        if (g->m->log) fprintf(stderr, "hengevm: virtio-gpu: the shared region (%llu MB) is at %#llx\n",
+                               (unsigned long long)(g->hostmem_size >> 20), (unsigned long long)bar);
+    } else if (bar != g->hostmem_pa) {
+        fprintf(stderr, "hengevm: virtio-gpu: the shared region was moved from %#llx to %#llx: not followed\n",
+                (unsigned long long)g->hostmem_pa, (unsigned long long)bar);
+        return RESP_ERR_UNSPEC;
+    }
+    void *data = NULL;
+    uint64_t size = 0;
+    if (vr.resource_map(r->id, &data, &size) || !data) return RESP_ERR_UNSPEC;
+    if (size < len) len = size & ~0xfffull;
+    hv_ram_set_pages(g->m, g->hostmem_ram, off >> 12, len >> 12, data);
+    r->mapped = 1, r->map_off = off, r->map_len = len;
+    *map_info = 0;
+    if (vr.resource_get_map_info) vr.resource_get_map_info(r->id, map_info);
+    return RESP_OK_MAP_INFO;
+}
+
+static void hostmem_unmap(HvGpuVirgl *v, Res *r) {
+    if (!r->mapped) return;
+    hv_ram_set_pages(v->g->m, v->g->hostmem_ram, r->map_off >> 12, r->map_len >> 12, NULL); /* and no CPU has them in its TLB */
+    vr.resource_unmap(r->id);
+    r->mapped = 0;
+}
+
+/* The display's EDID: one detailed timing, the size the host would like, at 60 Hz. */
+static void edid_make(uint8_t e[128], uint32_t w, uint32_t h) {
+    static const uint8_t head[] = {0x00, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x00, 0x21, 0xc7 /* "HNG" */, 0x34, 0x12, 0, 0, 0, 0, 1, 36, 1, 4,
+                                   0xa5, 0, 0, 0x78, 0x06, 0xee, 0x91, 0xa3, 0x54, 0x4c, 0x99, 0x26, 0x0f, 0x50, 0x54, 0, 0, 0};
+    memset(e, 0, 128);
+    memcpy(e, head, sizeof head);
+    uint32_t mm_w = w * 254 / 960, mm_h = h * 254 / 960; /* 96 pixels an inch */
+    e[21] = (uint8_t)(mm_w / 10), e[22] = (uint8_t)(mm_h / 10);
+    for (int i = 38; i < 54; i++) e[i] = 0x01; /* no standard timings */
+    uint32_t hbl = 160, vbl = 45, hfp = 48, hs = 32, vfp = 3, vs = 5;
+    uint32_t clk = (w + hbl) * (h + vbl) * 60 / 10000;
+    uint8_t *d = e + 54;
+    d[0] = (uint8_t)clk, d[1] = (uint8_t)(clk >> 8);
+    d[2] = (uint8_t)w, d[3] = (uint8_t)hbl, d[4] = (uint8_t)((w >> 8) << 4 | hbl >> 8);
+    d[5] = (uint8_t)h, d[6] = (uint8_t)vbl, d[7] = (uint8_t)((h >> 8) << 4 | vbl >> 8);
+    d[8] = (uint8_t)hfp, d[9] = (uint8_t)hs, d[10] = (uint8_t)(vfp << 4 | vs), d[11] = 0;
+    d[12] = (uint8_t)mm_w, d[13] = (uint8_t)mm_h, d[14] = (uint8_t)((mm_w >> 8) << 4 | mm_h >> 8);
+    d[17] = 0x1e; /* digital, separate syncs, both positive */
+    static const uint8_t name[18] = {0, 0, 0, 0xfc, 0, 'H', 'e', 'n', 'g', 'e', '\n', ' ', ' ', ' ', ' ', ' ', ' ', ' '};
+    memcpy(e + 72, name, 18);
+    static const uint8_t range[18] = {0, 0, 0, 0xfd, 0, 30, 120, 30, 200, 60, 0, 0x0a, ' ', ' ', ' ', ' ', ' ', ' '};
+    memcpy(e + 90, range, 18);
+    e[111] = 0x10; /* an unused descriptor */
+    uint8_t sum = 0;
+    for (int i = 0; i < 127; i++) sum = (uint8_t)(sum + e[i]);
+    e[127] = (uint8_t)(0 - sum);
+}
+
+/* The picture's size is the guest's choice on a Direct3D device. */
+static void display_size(HvGpuVirgl *v, uint32_t w, uint32_t h) {
+    HvVirtioGpu *g = v->g;
+    if (!g->d3d || !w || !h) return;
+    w = w > GPU_MAX_W ? GPU_MAX_W : w, h = h > GPU_MAX_H ? GPU_MAX_H : h;
+    if (w == g->width && h == g->height) return;
+    hv_dev_lock(g->m); /* what a reader of the display takes (host/vm.c) */
+    g->width = w, g->height = h;
+    hv_dev_unlock(g->m);
+    if (g->m->log) fprintf(stderr, "hengevm: virtio-gpu: the guest's picture is %ux%u\n", w, h);
+}
+
+/* A blob as the scanout, flushed: virglrenderer's texture of it (a host blob the guest's Direct3D drew) read
+   into the display, or the guest's own memory (a blob of its RAM) copied. */
+static uint32_t flush_blob(HvGpuVirgl *v, Res *r) {
+    HvVirtioGpu *g = v->g;
+    uint32_t w = 0, h = 0;
+    if (r->tex) {
+        if (hv_metal_texture_read(r->tex, g->display, g->width, g->height, &w, &h) != 0) return RESP_ERR_UNSPEC;
+        if (w != g->width) { /* narrower than the display: its rows go where the display's stride has them */
+            for (uint32_t y = h; y-- > 0;) memmove(g->display + (size_t)y * g->width, g->display + (size_t)y * w, (size_t)w * 4);
+        }
+    } else if (r->iov) {
+        uint32_t rows = r->sh < g->height ? r->sh : g->height, cols = r->sw < g->width ? r->sw : g->width;
+        for (uint32_t y = 0; y < rows; y++) {
+            uint64_t at = r->soffset + (uint64_t)y * r->sstride, left = (uint64_t)cols * 4;
+            uint8_t *dst = (uint8_t *)(g->display + (size_t)y * g->width);
+            for (int i = 0; i < r->niov && left; i++) {
+                if (at >= r->iov[i].iov_len) { at -= r->iov[i].iov_len; continue; }
+                uint64_t n = r->iov[i].iov_len - at < left ? r->iov[i].iov_len - at : left;
+                memcpy(dst, (uint8_t *)r->iov[i].iov_base + at, n);
+                dst += n, left -= n, at = 0;
+            }
+        }
+        if (r->sformat != B8G8R8A8 && r->sformat != B8G8R8X8)
+            for (uint32_t y = 0; y < rows; y++)
+                for (uint32_t x = 0; x < cols; x++) g->display[(size_t)y * g->width + x] = to_display(r->sformat, g->display[(size_t)y * g->width + x]);
+    } else return RESP_ERR_UNSPEC;
+    g->flushes++;
+    g->changes++;
+    return RESP_OK_NODATA;
+}
+
 /* The scanout's resource, the flushed rectangle of it, onto the display. */
 static uint32_t flush(HvGpuVirgl *v, const uint8_t *req) {
     HvVirtioGpu *g = v->g;
@@ -546,6 +761,7 @@ static uint32_t flush(HvGpuVirgl *v, const uint8_t *req) {
     Res *r = find(v, id);
     if (!r) return RESP_ERR_INVALID_RESOURCE_ID;
     if (id != v->scanout_res) return RESP_OK_NODATA;
+    if (r->blob) return flush_blob(v, r);
     if (v->present) {
         if (present_flush(v, r) == 0) {
             g->flushes++;
@@ -601,7 +817,7 @@ static uint32_t control(HvGpuVirgl *v, Req *q) {
     else switch (h.type) {
     case CMD_GET_DISPLAY_INFO: {
         type = RESP_OK_DISPLAY_INFO;
-        uint32_t mode[6] = {0, 0, g->width, g->height, 1, 0};
+        uint32_t mode[6] = {0, 0, g->d3d ? g->want_w : g->width, g->d3d ? g->want_h : g->height, 1, 0};
         memcpy(resp + 24, mode, sizeof mode);
         resp_len = 24 + MAX_SCANOUTS * 24;
         break;
@@ -610,8 +826,8 @@ static uint32_t control(HvGpuVirgl *v, Req *q) {
         uint32_t index;
         memcpy(&index, req + 24, 4);
         uint32_t info[4] = {0};
-        if (index < 2) {
-            info[0] = index + 1; /* VIRGL, VIRGL2 */
+        if (g->d3d ? index < v->ncapsets : index < 2) {
+            info[0] = g->d3d ? v->capset[index] : index + 1; /* VIRGL, VIRGL2 (and Neptune) */
             vr.get_cap_set(info[0], &info[1], &info[2]);
         }
         memcpy(resp + 24, info, sizeof info);
@@ -670,9 +886,125 @@ static uint32_t control(HvGpuVirgl *v, Req *q) {
         memcpy(&id, req + 44, 4);
         if (scanout != 0) { type = RESP_ERR_INVALID_SCANOUT_ID; break; }
         if (id && !find(v, id)) { type = RESP_ERR_INVALID_RESOURCE_ID; break; }
+        if (id) {
+            GpuRect sr;
+            memcpy(&sr, req + 24, 16);
+            Res *r = find(v, id);
+            display_size(v, sr.w ? sr.w : r->w, sr.h ? sr.h : r->h);
+        }
         v->scanout_res = id;
         g->scanout_res = id;
+        g->enabled = id != 0;
         if (!id) memset(g->display, 0, (size_t)g->width * g->height * 4);
+        break;
+    }
+    case CMD_GET_EDID: {
+        uint32_t size = 128;
+        memcpy(resp + 24, &size, 4);
+        static uint8_t edid[1024];
+        edid_make(edid, g->d3d ? g->want_w : g->width, g->d3d ? g->want_h : g->height);
+        Hdr o = {.type = RESP_OK_EDID, .flags = h.flags & FLAG_FENCE, .fence_id = h.fence_id, .ctx_id = h.ctx_id};
+        memcpy(resp, &o, sizeof o);
+        uint32_t wr = hv_virtq_write(&g->vio, e, 0, resp, 32);
+        wr += hv_virtq_write(&g->vio, e, 32, edid, sizeof edid);
+        return wr;
+    }
+    case CMD_RESOURCE_CREATE_BLOB: {
+        uint32_t c[4]; /* resource_id, blob_mem, blob_flags, nr_entries */
+        uint64_t blob_id, size;
+        memcpy(c, req + 24, 16);
+        memcpy(&blob_id, req + 40, 8);
+        memcpy(&size, req + 48, 8);
+        if (!g->d3d) { type = RESP_ERR_INVALID_PARAMETER; break; }
+        if (!c[0] || find(v, c[0])) { type = RESP_ERR_INVALID_RESOURCE_ID; break; }
+        Res *r = calloc(1, sizeof *r);
+        if (!r) { type = RESP_ERR_OUT_OF_MEMORY; break; }
+        r->id = c[0], r->blob = 1, r->blob_mem = c[1], r->blob_size = size;
+        if (c[1] != BLOB_MEM_HOST3D && c[3]) { /* its memory is the guest's: the entries say where */
+            if (c[3] > 1u << 20) { free(r); type = RESP_ERR_INVALID_PARAMETER; break; }
+            r->iov = calloc(c[3], sizeof *r->iov);
+            r->ents = calloc(c[3], sizeof *r->ents);
+            for (uint32_t i = 0; r->iov && r->ents && i < c[3]; i++) {
+                uint8_t ent[16];
+                uint64_t addr;
+                uint32_t len;
+                if (hv_virtq_read(&g->vio, e, 56 + i * 16, ent, 16) != 16) { type = RESP_ERR_INVALID_PARAMETER; break; }
+                memcpy(&addr, ent, 8);
+                memcpy(&len, ent + 8, 4);
+                void *p = hv_phys_ptr(g->m, addr, len);
+                if (!p) { type = RESP_ERR_INVALID_PARAMETER; break; }
+                r->iov[i] = (struct iovec){p, len};
+                r->ents[i].addr = addr, r->ents[i].len = len;
+            }
+            if (!r->iov || !r->ents) type = RESP_ERR_OUT_OF_MEMORY;
+            r->niov = (int)c[3];
+        }
+        struct virgl_renderer_resource_create_blob_args a = {
+            .res_handle = c[0], .ctx_id = h.ctx_id, .blob_mem = c[1], .blob_flags = c[2], .blob_id = blob_id, .size = size,
+            .iovecs = r->iov, .num_iovs = (uint32_t)r->niov};
+        int brc = type == RESP_OK_NODATA ? vr.resource_create_blob(&a) : -1;
+        if (getenv("HV_GPU_LOG"))
+            fprintf(stderr, "gpu3d: blob %u ctx %u mem %u flags %#x id %llu size %llu entries %u -> %d\n", c[0], h.ctx_id, c[1], c[2],
+                    (unsigned long long)blob_id, (unsigned long long)size, c[3], brc);
+        if (brc) {
+            free(r->iov), free(r->ents), free(r);
+            if (type == RESP_OK_NODATA) type = RESP_ERR_UNSPEC;
+            break;
+        }
+        r->next = v->res;
+        v->res = r;
+        break;
+    }
+    case CMD_RESOURCE_MAP_BLOB: {
+        uint32_t id, info = 0;
+        uint64_t off;
+        memcpy(&id, req + 24, 4);
+        memcpy(&off, req + 32, 8);
+        Res *r = find(v, id);
+        if (!r) { type = RESP_ERR_INVALID_RESOURCE_ID; break; }
+        type = hostmem_map(v, r, off, &info);
+        if (getenv("HV_GPU_LOG")) fprintf(stderr, "gpu3d: map blob %u at %#llx -> %#x (how %d, info %#x)\n", id, (unsigned long long)off, type, r->mapped, info);
+        if (type == RESP_OK_MAP_INFO) memcpy(resp + 24, &info, 4), resp_len = 32;
+        break;
+    }
+    case CMD_RESOURCE_UNMAP_BLOB: {
+        uint32_t id;
+        memcpy(&id, req + 24, 4);
+        Res *r = find(v, id);
+        if (!r) { type = RESP_ERR_INVALID_RESOURCE_ID; break; }
+        hostmem_unmap(v, r);
+        break;
+    }
+    case CMD_SET_SCANOUT_BLOB: {
+        GpuRect sr;
+        uint32_t c[6], stride, offset; /* scanout_id, resource_id, width, height, format, padding */
+        memcpy(&sr, req + 24, 16);
+        memcpy(c, req + 40, 24);
+        memcpy(&stride, req + 64, 4);
+        memcpy(&offset, req + 80, 4);
+        if (c[0] != 0) { type = RESP_ERR_INVALID_SCANOUT_ID; break; }
+        if (!c[1]) {
+            v->scanout_res = g->scanout_res = 0;
+            g->enabled = 0;
+            break;
+        }
+        Res *r = find(v, c[1]);
+        if (!r || !r->blob) { type = RESP_ERR_INVALID_RESOURCE_ID; break; }
+        if (c[2] < 16 || c[3] < 16 || sr.w < 16 || sr.h < 16 || sr.x + sr.w > c[2] || sr.y + sr.h > c[3]) { type = RESP_ERR_INVALID_PARAMETER; break; }
+        if (r->tex && vr.release_handle_for_scanout) vr.release_handle_for_scanout(VIRGL_NATIVE_HANDLE_METAL_TEXTURE, r->tex);
+        r->tex = NULL;
+        void *handle = NULL;
+        int kind = vr.create_handle_for_scanout ? vr.create_handle_for_scanout(c[1], c[2], c[3], c[4], c[5], stride, offset, &handle) : 0;
+        if (kind == VIRGL_NATIVE_HANDLE_METAL_TEXTURE) r->tex = handle;
+        else if (kind && vr.release_handle_for_scanout) vr.release_handle_for_scanout(kind, handle);
+        if (g->m->log || getenv("HV_GPU_LOG"))
+            fprintf(stderr, "hengevm: virtio-gpu: scanout is blob %u, %ux%u format %u stride %u offset %u: %s\n", c[1], c[2], c[3], c[4],
+                    stride, offset, r->tex ? "a Metal texture" : r->iov ? "the guest's memory" : "NOTHING to show it from");
+        if (!r->tex && !r->iov) { type = RESP_ERR_UNSPEC; break; }
+        r->sw = c[2], r->sh = c[3], r->sformat = c[4], r->sstride = stride ? stride : c[2] * 4, r->soffset = offset;
+        display_size(v, sr.w, sr.h);
+        v->scanout_res = g->scanout_res = c[1];
+        g->enabled = 1;
         break;
     }
     case CMD_RESOURCE_FLUSH: type = flush(v, req); break;
@@ -759,7 +1091,13 @@ static uint32_t control(HvGpuVirgl *v, Req *q) {
         memcpy(&nlen, req + 24, 4);
         if (nlen > 64) nlen = 64;
         memcpy(name, req + 32, nlen);
-        if (vr.context_create(h.ctx_id, nlen, name)) type = RESP_ERR_UNSPEC;
+        uint32_t init;
+        memcpy(&init, req + 28, 4); /* context_init: the capability set (protocol) the context speaks, or 0 */
+        int crc = init && vr.context_create_with_flags ? vr.context_create_with_flags(h.ctx_id, init, nlen, name)
+                                                       : vr.context_create(h.ctx_id, nlen, name);
+        if (g->d3d && (g->m->log || getenv("HV_GPU_LOG")))
+            fprintf(stderr, "hengevm: virtio-gpu: context %u \"%s\" (protocol %u) -> %d\n", h.ctx_id, name, init & 0xff, crc);
+        if (crc) type = RESP_ERR_UNSPEC;
         break;
     }
     case CMD_CTX_DESTROY: vr.context_destroy(h.ctx_id); break;
@@ -792,8 +1130,12 @@ static uint32_t control(HvGpuVirgl *v, Req *q) {
                      h.flags & FLAG_FENCE ? " fenced" : "");
     Hdr out = {.type = type, .flags = h.flags & FLAG_FENCE, .fence_id = h.flags & FLAG_FENCE ? h.fence_id : 0,
                .ctx_id = h.ctx_id, .ring_idx = h.ring_idx};
+    if (h.flags & FLAG_RING_IDX) out.flags |= FLAG_RING_IDX;
     memcpy(resp, &out, sizeof out);
-    if (h.flags & FLAG_FENCE) q->fenced = 1, q->fence = (uint32_t)h.fence_id;
+    if (h.flags & FLAG_FENCE) {
+        q->fenced = 1, q->fence = (uint32_t)h.fence_id;
+        q->ringed = (h.flags & FLAG_RING_IDX) != 0, q->ctx = h.ctx_id, q->ring = h.ring_idx, q->fence64 = h.fence_id;
+    }
     return hv_virtq_write(&g->vio, e, 0, resp, resp_len);
 }
 
@@ -825,6 +1167,15 @@ static void cursor(HvGpuVirgl *v, const HvVirtqElem *e) {
 }
 
 static int fence_passed(HvGpuVirgl *v, uint32_t f) { return (int32_t)(v->last_fence - f) >= 0; }
+
+/* The driver reset the device: every resource and context goes (the worker's, as they were made). */
+static void let_go(HvGpuVirgl *v) {
+    v->reset_req = 0;
+    v->scanout_res = 0;
+    while (v->res) unref(v, v->res->id);
+    if (vr.reset) vr.reset();
+    if (v->g->m->log) fprintf(stderr, "hengevm: virtio-gpu: reset by its driver\n");
+}
 
 static void *worker(void *arg) {
     HvGpuVirgl *v = arg;
@@ -858,31 +1209,30 @@ static void *worker(void *arg) {
         pthread_mutex_unlock(&v->mu);
         int finished = 0;
         while (v->taken != upto) {
+            if (v->reset_req && v->taken == v->reset_at) let_go(v);
             Req *q = &v->ring[v->taken % RING];
-            q->fenced = 0;
+            q->fenced = q->ringed = 0;
             if (q->q == CONTROLQ) q->written = control(v, q);
             else cursor(v, &q->e), q->written = 0;
-            if (q->fenced) vr.create_fence((int)q->fence, 0);
+            v->taken++; /* before its fence can pass: the callback looks up to here */
+            if (q->fenced && q->ringed) {
+                if (vr.context_create_fence(q->ctx, VIRGL_RENDERER_FENCE_FLAG_MERGEABLE, q->ring, q->fence64))
+                    __atomic_store_n(&q->done, 1, __ATOMIC_RELEASE), finished = 1; /* no such context: nothing to wait for */
+            } else if (q->fenced) vr.create_fence((int)q->fence, 0);
             else __atomic_store_n(&q->done, 1, __ATOMIC_RELEASE), finished = 1;
-            v->taken++;
         }
+        if (v->reset_req && v->taken == v->reset_at) let_go(v);
         vr.poll();
         for (uint32_t i = v->published; i != v->taken; i++) {
             Req *q = &v->ring[i % RING];
-            if (q->fenced && !q->done && fence_passed(v, q->fence)) __atomic_store_n(&q->done, 1, __ATOMIC_RELEASE), finished = 1;
+            if (q->fenced && !q->ringed && !q->done && fence_passed(v, q->fence)) __atomic_store_n(&q->done, 1, __ATOMIC_RELEASE), finished = 1;
         }
         if (finished) hv_machine_wake(v->g->m);
     }
     /* Stopped (the machine is being released): everything this thread made, so another machine can start 3D. */
     if (vr.force_ctx_0) vr.force_ctx_0();
     present_drop(v);
-    while (v->res) {
-        Res *r = v->res;
-        detach(v, r);
-        vr.resource_unref(r->id);
-        v->res = r->next;
-        free(r);
-    }
+    while (v->res) unref(v, v->res->id);
     if (vr.cleanup) vr.cleanup(v);
     egl.MakeCurrent(v->dpy, NULL, NULL, NULL);
     if (v->main_ctx) egl.DestroyContext(v->dpy, v->main_ctx);
@@ -899,6 +1249,7 @@ static void notify(HvVirtio *vio, int qi) {
         if (hv_virtq_pop(vio, qi, &q->e) <= 0) break;
         q->q = qi;
         q->done = 0;
+        q->epoch = v->epoch;
         pthread_mutex_lock(&v->mu);
         __atomic_store_n(&v->submitted, v->submitted + 1, __ATOMIC_RELEASE);
         pthread_mutex_unlock(&v->mu);
@@ -914,8 +1265,9 @@ void hv_gpu_virgl_poll(HvGpuVirgl *v) {
     for (uint32_t i = v->published; i != v->submitted; i++) {
         Req *q = &v->ring[i % RING];
         if (q->pushed || !__atomic_load_n(&q->done, __ATOMIC_ACQUIRE)) continue;
-        hv_virtq_push(vio, q->q, &q->e, q->written);
         q->pushed = 1;
+        if (q->epoch != v->epoch) continue; /* queued before a reset: its queue is gone */
+        hv_virtq_push(vio, q->q, &q->e, q->written);
         any = 1, last_q = q->q;
     }
     while (v->published != v->submitted && v->ring[v->published % RING].pushed) {
@@ -953,6 +1305,18 @@ HvGpuVirgl *hv_gpu_virgl_start(HvVirtioGpu *g, const char *dir) {
 }
 
 void hv_gpu_virgl_attach(HvGpuVirgl *v) { v->g->vio.notify = notify; }
+
+uint32_t hv_gpu_virgl_capsets(HvGpuVirgl *v) { return v ? v->ncapsets : 0; }
+
+void hv_gpu_virgl_reset(HvGpuVirgl *v) {
+    if (!v) return;
+    pthread_mutex_lock(&v->mu);
+    v->epoch++;
+    v->reset_at = v->submitted;
+    v->reset_req = 1;
+    pthread_mutex_unlock(&v->mu);
+    pthread_cond_signal(&v->cv);
+}
 
 void hv_gpu_virgl_stop(HvGpuVirgl *v) {
     if (!v) return;

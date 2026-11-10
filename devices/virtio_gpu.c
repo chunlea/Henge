@@ -4,6 +4,7 @@
 #include "virtio_gpu_virgl.h"
 
 #include <stdio.h>
+#include <sys/mman.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -264,6 +265,45 @@ HvVirtioGpu *hv_virtio_gpu_create(HvMachine *m, HvPcie *bus, uint32_t width, uin
     return g;
 }
 
+static void was_reset(HvVirtio *v) {
+    HvVirtioGpu *g = v->dev;
+    g->enabled = 0;
+    g->scanout_res = 0;
+    hv_gpu_virgl_reset(g->virgl);
+}
+
+HvVirtioGpu *hv_virtio_gpu_create_d3d(HvMachine *m, HvPcie *bus, uint32_t width, uint32_t height, const char *dir) {
+    HvVirtioGpu *g = calloc(1, sizeof *g);
+    HvVirtio *v = &g->vio;
+    g->m = m, g->d3d = 1;
+    g->width = g->want_w = width, g->height = g->want_h = height;
+    g->display = calloc((size_t)GPU_MAX_W * GPU_MAX_H, 4);
+    /* The shared memory region: guest addresses its driver has the host's blobs put at (HV_GPU_HOSTMEM_MB: its
+       size, 4096). */
+    g->hostmem_size = (uint64_t)(getenv("HV_GPU_HOSTMEM_MB") ? atoi(getenv("HV_GPU_HOSTMEM_MB")) : 4096) << 20;
+    if (!g->display) {
+        free(g);
+        return NULL;
+    }
+    g->virgl = hv_gpu_virgl_start(g, dir);
+    if (!g->virgl) {
+        fprintf(stderr, "hengevm: virtio-gpu: Direct3D cannot start (%s)\n", dir);
+        free(g->display), free(g);
+        return NULL;
+    }
+    hv_virtio_init(v, m, 16, 0x038000, 2, GPU_F_VIRGL | GPU_F_EDID | GPU_F_RESOURCE_BLOB | GPU_F_CONTEXT_INIT);
+    v->dev = g;
+    v->config_write = config_write;
+    v->was_reset = was_reset;
+    uint32_t cfg[4] = {0, 0, 1, hv_gpu_virgl_capsets(g->virgl)};
+    memcpy(v->config, cfg, sizeof cfg);
+    v->config_len = 16;
+    hv_virtio_add_shm(v, 2, 1, g->hostmem_size); /* VIRTIO_GPU_SHM_ID_HOST_VISIBLE */
+    hv_gpu_virgl_attach(g->virgl);
+    hv_pcie_attach(bus, &v->pci);
+    return g;
+}
+
 void hv_virtio_gpu_poll(HvVirtioGpu *g) {
     if (g) hv_gpu_virgl_poll(g->virgl);
 }
@@ -297,5 +337,6 @@ void hv_virtio_gpu_destroy(HvVirtioGpu *g) {
     if (!g) return;
     hv_gpu_virgl_stop(g->virgl);
     while (g->res) unref(g, g->res->id);
+    if (g->d3d) free(g->display);
     free(g);
 }
