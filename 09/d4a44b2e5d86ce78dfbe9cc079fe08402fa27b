@@ -1,0 +1,19 @@
+ios/.gitignore
+  s_b434919f53a453::t_2db3accab0b137 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "09d4a44b2e5d86ce78dfbe9cc079fe08402fa27b",
+  "prompts": {},
+  "sessions": {
+    "s_b434919f53a453": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e46d13fe-34ab-43b9-8d44-1e8747a007c8",
+        "model": "unknown"
+      },
+      "human_author": "chunli <git@chunli.dev>"
+    }
+  }
+}
