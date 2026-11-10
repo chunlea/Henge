@@ -1,0 +1,45 @@
+devices/fw_cfg.c
+  s_be58c8822e297c::t_d41c32bedde847 1-162
+devices/fw_cfg.h
+  s_be58c8822e297c::t_a1da159ba8b872 1-43
+devices/pflash.c
+  s_be58c8822e297c::t_530844ac3c7468 1-123
+devices/pflash.h
+  s_be58c8822e297c::t_1113aab754e6d9 1-31
+devices/virt.c
+  s_be58c8822e297c::t_c60256e54bb77a 1-67
+devices/virt.h
+  s_be58c8822e297c::t_f3de174dbb2c53 1-50
+devices/vmapple.c
+  s_be58c8822e297c::t_552760e0afced6 19,240,248-249,281-294,341,395-397
+devices/vmapple.h
+  s_be58c8822e297c::t_4ff60c63c678ea 87-91,98-101
+Makefile
+  s_be58c8822e297c::t_357b2d22f3f228 10,75-76,147
+host/main.c
+  s_be58c8822e297c::t_66db8fc24b26db 917-918,981,1024-1025,1055-1056,1063-1064,1107
+host/uefi_boot.c
+  s_be58c8822e297c::t_da83ad570604fb 1-197
+host/uefi_boot.h
+  s_be58c8822e297c::t_b85e41164558ec 1-24
+host/vm.c
+  s_be58c8822e297c::t_cebed279df5f08 25,80,277-278,290,296,299,316-325,333,336,343,670
+host/vm.h
+  s_be58c8822e297c::t_ff0aa7bafd3028 31-33
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "d3e31ff66ff4f2a518e0a1485dcb4c4d960b6ec7",
+  "prompts": {},
+  "sessions": {
+    "s_be58c8822e297c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "460830a0-c917-44aa-9aea-92d45fd794ef",
+        "model": "unknown"
+      },
+      "human_author": "chunli <git@chunli.dev>"
+    }
+  }
+}
