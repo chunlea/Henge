@@ -1,0 +1,19 @@
+core/memop.c
+  s_be58c8822e297c::t_ea4e096eb92085 161-163,699-703
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "b7e7bfc55bd7b5f8fc14ffcda85d07c432c799da",
+  "prompts": {},
+  "sessions": {
+    "s_be58c8822e297c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "460830a0-c917-44aa-9aea-92d45fd794ef",
+        "model": "unknown"
+      },
+      "human_author": "chunli <git@chunli.dev>"
+    }
+  }
+}
