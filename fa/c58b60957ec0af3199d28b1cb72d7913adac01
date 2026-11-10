@@ -1,0 +1,31 @@
+ios/Henge/LinuxShortcuts.swift
+  s_5f13ddd5a833ec::t_653e8b4ef04ce9 1-159
+ios/Henge/SessionView.swift
+  s_862d92eac8a50c::t_7875f330bf7e2d 13,385-387,390-391,393,397,405,407,577-578
+ios/Henge/SettingsView.swift
+  s_862d92eac8a50c::t_1d9b7ab8e862f6 132-133
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "fac58b60957ec0af3199d28b1cb72d7913adac01",
+  "prompts": {},
+  "sessions": {
+    "s_5f13ddd5a833ec": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5f607dec-e0c6-419e-ae6a-60c8e0859601",
+        "model": "claude-fable-5-2"
+      },
+      "human_author": "chunli <git@chunli.dev>"
+    },
+    "s_862d92eac8a50c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2a2ea67b-10a4-470a-aa9f-ca4aec62a749",
+        "model": "unknown"
+      },
+      "human_author": "chunli <git@chunli.dev>"
+    }
+  }
+}
