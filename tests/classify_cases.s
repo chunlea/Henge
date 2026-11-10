@@ -48,4 +48,5 @@ _hv_classify_cases:
     xpaci x2                    // pac
     pacga x3, x4, x5            // pac
     udf #0                      // undefined
+    .inst 0xd500401f            // cfinv: copy
 _hv_classify_cases_end:
