@@ -180,6 +180,16 @@ typedef struct HvCpu {
        which is where Linux leaves it between one process and the next. No user address space then (hv_user_key 0). */
     int user_parked;
     uint32_t tlb_epoch_seen; /* the machine's tlb_epoch this CPU last emptied its TLB for */
+    /* Kernel tables that change with the process (Windows: each process's top-level table has its own
+       kernel half, the same as every other's but for a few entries; hv_tlb_switch_kernel). kpriv is those
+       entries, by index into a 512-entry top-level table, as this CPU has seen them differ. Kernel TLB
+       entries filled under them since the last switch are in kpriv_fills (more than the list holds: a
+       whole flush), and kpriv_exec says one of them could be run from. */
+#define HV_KPRIV_FILLS 1024
+    uint64_t kpriv[8];
+    uint16_t kpriv_fills[HV_KPRIV_FILLS];
+    uint32_t nkpriv_fills;
+    int kpriv_exec;
 } HvCpu;
 
 #define HV_CPU_X(n)        ((n) * 8)

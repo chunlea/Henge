@@ -225,8 +225,13 @@ static int write_reg(HvCpu *cpu, uint32_t reg, uint64_t v) {
         int a1 = (cpu->tcr_el1 >> 22) & 1;
         uint64_t changed = cpu->ttbr1_el1 ^ v, old_key = hv_user_key(cpu);
         cpu->ttbr1_el1 = v;
-        if (changed & 0x0000ffffffffffffull) cpu->m->stats.flush_why[3]++, hv_tlb_flush(cpu); /* other kernel tables */
-        else if (a1 && changed) {
+        if (changed & 0x0000ffffffffffffull) { /* other kernel tables */
+            if (!hv_tlb_switch_kernel(cpu, cpu->ttbr1_el1 ^ changed, v)) cpu->m->stats.flush_why[3]++, hv_tlb_flush(cpu);
+            else if (old_key != hv_user_key(cpu)) {
+                hv_tlb_switch_user(cpu, old_key, hv_user_key(cpu));
+                if (!cpu->user_parked) hv_ijc_switch(cpu);
+            }
+        } else if (a1 && changed) {
             /* Linux's process switch: the ASID, which it keeps here, and the same kernel tables. Kernel entries stay
                (what they map does not depend on the ASID); the user half changes hands as on a TTBR0 write. */
             hv_tlb_switch_user(cpu, old_key, hv_user_key(cpu));

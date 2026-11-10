@@ -116,6 +116,7 @@ typedef struct HvStats {
     uint64_t code_ijc[3];     /* code changes: no cached target into the page, its VA page's targets dropped, all dropped (HV_IJC_PAGES) */
     uint64_t ijc_reset_kind[4]; /* whole branch-cache drops: user half, kernel half, one process's by TLBI ASID, one process's by a range of 64 MB or more */
     uint64_t kernel_ranges;   /* big kernel-range TLBIs, dropped by range rather than with everything */
+    uint64_t kswitches;       /* TTBR1 to another table, with the kernel entries both tables agree on kept */
     uint64_t tlb_range_flushes; /* and that dropped only the TLB entries in the range */     /* of hv_ijc_resolve's lookups, ones that walked for the target page */   /* hv_ijc_resolve could not: chaining off/odd target, filters full, no TLB entry, block not made yet */   /* the same for hv_ijc_resolve's fills */
     uint64_t fill_kind[4];    /* ijc fills into an empty slot, over another live salt, over the same salt, over a dead salt */
     uint64_t flush_why[8];
