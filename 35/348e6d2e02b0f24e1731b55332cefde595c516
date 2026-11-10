@@ -1,0 +1,47 @@
+devices/fw_cfg.c
+  s_be58c8822e297c::t_8591a09e4f7c6e 49-52,103
+devices/fw_cfg.h
+  s_be58c8822e297c::t_adaba58786170e 32-34
+devices/virt.c
+  s_be58c8822e297c::t_c90496491e16ac 40-70,107-108
+devices/virt.h
+  s_be58c8822e297c::t_fb465642c1496c 48
+devices/vmapple.h
+  s_be58c8822e297c::t_e92962cb557f98 69-70
+docs/windows-guest.md
+  s_be58c8822e297c::t_540e17971c97ce 80-94,155-157
+host/main.c
+  s_be58c8822e297c::t_0370525f847f71 1030,1086,1116
+host/vm.c
+  s_be58c8822e297c::t_e7eb114c5fdcb5 355-356
+host/vm.h
+  s_be58c8822e297c::t_b62f306a3ee55b 30
+ios/Henge/Hardware.swift
+  s_be58c8822e297c::t_98bd65546c7dd6 27-36
+ios/Henge/Machines.swift
+  s_be58c8822e297c::t_49220ac2b68ffd 329-335
+ios/Henge/Native/henge-vm.c
+  s_be58c8822e297c::t_91b55c7720914c 135,144
+ios/Henge/Native/henge-vm.h
+  s_be58c8822e297c::t_fcd632558727f4 19-20,22
+ios/Henge/SessionView.swift
+  s_be58c8822e297c::t_613cb707ceb57f 571,686
+ios/Henge/WindowsView.swift
+  s_be58c8822e297c::t_312ae28da2aa63 433-449
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "35348e6d2e02b0f24e1731b55332cefde595c516",
+  "prompts": {},
+  "sessions": {
+    "s_be58c8822e297c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "460830a0-c917-44aa-9aea-92d45fd794ef",
+        "model": "unknown"
+      },
+      "human_author": "chunli <git@chunli.dev>"
+    }
+  }
+}
