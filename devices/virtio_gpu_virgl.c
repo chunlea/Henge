@@ -99,7 +99,7 @@ static struct {
     void (*reset)(void);
 } vr;
 
-int hv_metal_texture_read(void *texture, uint32_t *out, uint32_t max_w, uint32_t max_h, uint32_t *w, uint32_t *h); /* virtio_gpu_metal.m */
+int hv_metal_texture_read(void *texture, uint8_t *out, size_t stride, uint32_t max_w, uint32_t max_h, uint32_t *w, uint32_t *h); /* virtio_gpu_metal.m */
 IOSurfaceRef hv_metal_texture_surface(void *texture);
 
 /* --- EGL (ANGLE), what is used of it --- */
@@ -240,6 +240,11 @@ struct HvGpuVirgl {
     int reset_req;                        /* the worker is to let go of everything when it reaches reset_at */
     uint32_t reset_at;
     IOSurfaceRef scan_surf;               /* the scanout blob's surface (its Res's; under present_mu), or NULL */
+    /* A scanout texture with no surface of its own is read into one of these two, by turns: the one read last is
+       what is shown (own_front; -1 none yet). One copy a frame, and a layer shows the surface as it is. */
+    IOSurfaceRef own[2];
+    uint32_t own_w, own_h;
+    int own_front;
 };
 
 static void hostmem_unmap(HvGpuVirgl *v, Res *r);
@@ -626,7 +631,8 @@ static int present_flush(HvGpuVirgl *v, Res *r) {
 IOSurfaceRef hv_gpu_virgl_surface(HvGpuVirgl *v) {
     if (!v || (!v->present && !v->g->d3d)) return NULL;
     pthread_mutex_lock(&v->present_mu);
-    IOSurfaceRef s = v->g->d3d ? v->scan_surf : v->front >= 0 ? v->surf[v->front] : NULL;
+    IOSurfaceRef s = !v->g->d3d ? (v->front >= 0 ? v->surf[v->front] : NULL)
+                     : v->scan_surf ? v->scan_surf : v->own_front >= 0 ? v->own[v->own_front] : NULL;
     if (s) CFRetain(s);
     pthread_mutex_unlock(&v->present_mu);
     return s;
@@ -732,6 +738,25 @@ static void display_size(HvGpuVirgl *v, uint32_t w, uint32_t h) {
     if (g->m->log) fprintf(stderr, "hengevm: virtio-gpu: the guest's picture is %ux%u\n", w, h);
 }
 
+/* The two surfaces a surfaceless scanout texture is read into, at the picture's size. */
+static void own_make(HvGpuVirgl *v, uint32_t w, uint32_t h) {
+    pthread_mutex_lock(&v->present_mu);
+    v->own_front = -1;
+    for (int i = 0; i < 2; i++) {
+        if (v->own[i]) CFRelease(v->own[i]);
+        int32_t wi = (int32_t)w, hi = (int32_t)h, bpe = 4, fmt = 'BGRA';
+        CFNumberRef nw = CFNumberCreate(NULL, kCFNumberSInt32Type, &wi), nh = CFNumberCreate(NULL, kCFNumberSInt32Type, &hi),
+                    nb = CFNumberCreate(NULL, kCFNumberSInt32Type, &bpe), nf = CFNumberCreate(NULL, kCFNumberSInt32Type, &fmt);
+        const void *keys[] = {kIOSurfaceWidth, kIOSurfaceHeight, kIOSurfaceBytesPerElement, kIOSurfacePixelFormat};
+        const void *vals[] = {nw, nh, nb, nf};
+        CFDictionaryRef d = CFDictionaryCreate(NULL, keys, vals, 4, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+        v->own[i] = IOSurfaceCreate(d);
+        CFRelease(d), CFRelease(nw), CFRelease(nh), CFRelease(nb), CFRelease(nf);
+    }
+    v->own_w = w, v->own_h = h;
+    pthread_mutex_unlock(&v->present_mu);
+}
+
 /* A blob as the scanout, flushed: virglrenderer's texture of it (a host blob the guest's Direct3D drew) read
    into the display, or the guest's own memory (a blob of its RAM) copied. */
 static uint32_t flush_blob(HvGpuVirgl *v, Res *r) {
@@ -739,11 +764,21 @@ static uint32_t flush_blob(HvGpuVirgl *v, Res *r) {
     uint32_t w = 0, h = 0;
     if (r->surf) { /* shown as it is, or copied by whoever wants the pixels (hv_gpu_virgl_read) */
     } else if (r->tex) {
-        if (hv_metal_texture_read(r->tex, g->display, g->width, g->height, &w, &h) != 0) return RESP_ERR_UNSPEC;
-        if (w != g->width) { /* narrower than the display: its rows go where the display's stride has them */
-            for (uint32_t y = h; y-- > 0;) memmove(g->display + (size_t)y * g->width, g->display + (size_t)y * w, (size_t)w * 4);
-        }
+        if (v->own_w != g->width || v->own_h != g->height || !v->own[0]) own_make(v, g->width, g->height);
+        int b = v->own_front == 0 ? 1 : 0;
+        IOSurfaceRef sf = v->own[b];
+        if (!sf) return RESP_ERR_OUT_OF_MEMORY;
+        IOSurfaceLock(sf, 0, NULL);
+        int rc = hv_metal_texture_read(r->tex, IOSurfaceGetBaseAddress(sf), IOSurfaceGetBytesPerRow(sf), g->width, g->height, &w, &h);
+        IOSurfaceUnlock(sf, 0, NULL);
+        if (rc != 0) return RESP_ERR_UNSPEC;
+        pthread_mutex_lock(&v->present_mu);
+        v->own_front = b;
+        pthread_mutex_unlock(&v->present_mu);
     } else if (r->iov) {
+        pthread_mutex_lock(&v->present_mu);
+        v->own_front = -1; /* the picture is in the display buffer now */
+        pthread_mutex_unlock(&v->present_mu);
         uint32_t rows = r->sh < g->height ? r->sh : g->height, cols = r->sw < g->width ? r->sw : g->width;
         for (uint32_t y = 0; y < rows; y++) {
             uint64_t at = r->soffset + (uint64_t)y * r->sstride, left = (uint64_t)cols * 4;
@@ -906,7 +941,7 @@ static uint32_t control(HvGpuVirgl *v, Req *q) {
             display_size(v, sr.w ? sr.w : r->w, sr.h ? sr.h : r->h);
         }
         pthread_mutex_lock(&v->present_mu);
-        v->scan_surf = NULL; /* not a blob's surface */
+        v->scan_surf = NULL, v->own_front = -1; /* not a blob's surface */
         pthread_mutex_unlock(&v->present_mu);
         v->scanout_res = id;
         g->scanout_res = id;
@@ -1003,7 +1038,7 @@ static uint32_t control(HvGpuVirgl *v, Req *q) {
             v->scanout_res = g->scanout_res = 0;
             g->enabled = 0;
             pthread_mutex_lock(&v->present_mu);
-            v->scan_surf = NULL;
+            v->scan_surf = NULL, v->own_front = -1;
             pthread_mutex_unlock(&v->present_mu);
             break;
         }
@@ -1317,6 +1352,7 @@ HvGpuVirgl *hv_gpu_virgl_start(HvVirtioGpu *g, const char *dir) {
     pthread_mutex_init(&v->mu, NULL);
     pthread_mutex_init(&v->present_mu, NULL);
     v->front = -1;
+    v->own_front = -1;
     pthread_cond_init(&v->cv, NULL);
     pthread_attr_t at;
     pthread_attr_init(&at);

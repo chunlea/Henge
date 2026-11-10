@@ -7,8 +7,8 @@
 #include <stdint.h>
 #include <string.h>
 
-/* The texture's top-left max_w x max_h pixels (or all of it) into out, B8G8R8X8, stride *w. 0, or -1. */
-int hv_metal_texture_read(void *texture, uint32_t *out, uint32_t max_w, uint32_t max_h, uint32_t *w, uint32_t *h) {
+/* The texture's top-left max_w x max_h pixels (or all of it) into out, B8G8R8X8, rows `stride` bytes apart. 0, or -1. */
+int hv_metal_texture_read(void *texture, uint8_t *out, size_t stride, uint32_t max_w, uint32_t max_h, uint32_t *w, uint32_t *h) {
     @autoreleasepool {
         id<MTLTexture> t = (__bridge id<MTLTexture>)texture;
         if (!t) return -1;
@@ -21,8 +21,8 @@ int hv_metal_texture_read(void *texture, uint32_t *out, uint32_t max_w, uint32_t
         if (s) { /* shared with the process that drew it: read its memory */
             IOSurfaceLock(s, kIOSurfaceLockReadOnly, NULL);
             const uint8_t *base = IOSurfaceGetBaseAddress(s);
-            size_t stride = IOSurfaceGetBytesPerRow(s);
-            for (uint32_t y = 0; y < th; y++) memcpy(out + (size_t)y * tw, base + y * stride, (size_t)tw * 4);
+            size_t from = IOSurfaceGetBytesPerRow(s);
+            for (uint32_t y = 0; y < th; y++) memcpy(out + (size_t)y * stride, base + y * from, (size_t)tw * 4);
             IOSurfaceUnlock(s, kIOSurfaceLockReadOnly, NULL);
         } else {
             id<MTLTexture> from = t;
@@ -45,10 +45,13 @@ int hv_metal_texture_read(void *texture, uint32_t *out, uint32_t max_w, uint32_t
                 [cb waitUntilCompleted];
                 from = copy;
             }
-            [from getBytes:out bytesPerRow:(NSUInteger)tw * 4 fromRegion:MTLRegionMake2D(0, 0, tw, th) mipmapLevel:0];
+            [from getBytes:out bytesPerRow:stride fromRegion:MTLRegionMake2D(0, 0, tw, th) mipmapLevel:0];
         }
         if (rgba)
-            for (size_t i = 0, n = (size_t)tw * th; i < n; i++) out[i] = (out[i] & 0xff00ff00u) | (out[i] >> 16 & 0xff) | (out[i] & 0xff) << 16;
+            for (uint32_t y = 0; y < th; y++) {
+                uint32_t *row = (uint32_t *)(void *)(out + (size_t)y * stride);
+                for (uint32_t x = 0; x < tw; x++) row[x] = (row[x] & 0xff00ff00u) | (row[x] >> 16 & 0xff) | (row[x] & 0xff) << 16;
+            }
         *w = tw, *h = th;
         return 0;
     }
