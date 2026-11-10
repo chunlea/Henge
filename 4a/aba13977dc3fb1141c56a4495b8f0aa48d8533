@@ -1,0 +1,29 @@
+core/translate.c
+  s_5d579fcfcf203e::t_492094f075bff1 901-904
+tests/mem_programs.S
+  s_6e3df245f66543::t_b3a582bae3cdcf 166-169
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "4aaba13977dc3fb1141c56a4495b8f0aa48d8533",
+  "prompts": {},
+  "sessions": {
+    "s_5d579fcfcf203e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "727becf5-5273-4b49-834b-c569b966f9b1",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "chunli <git@chunli.dev>"
+    },
+    "s_6e3df245f66543": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5813d87a-5080-4c34-ba9f-d2c8fa4b8bba",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "chunli <git@chunli.dev>"
+    }
+  }
+}
