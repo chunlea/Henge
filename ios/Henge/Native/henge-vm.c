@@ -374,6 +374,19 @@ void henge_vm_mouse_scroll(int dx, int dy) {
     if (dx) hv_vm_mouse_hwheel(dx);
     pthread_rwlock_unlock(&api_lock);
 }
+void henge_vm_display_wanted(uint32_t width, uint32_t height) {
+    if (!lock_running()) return;
+    hv_vm_display_wanted(width, height);
+    pthread_rwlock_unlock(&api_lock);
+}
+
+int henge_vm_display_size(uint32_t *width, uint32_t *height) {
+    if (!lock_running()) return -1;
+    int rc = hv_vm_display_size(width, height);
+    pthread_rwlock_unlock(&api_lock);
+    return rc;
+}
+
 int henge_vm_gpu_driver_active(void) {
     if (!lock_running()) return 0;
     int on = hv_vm_gpu_driver_active();

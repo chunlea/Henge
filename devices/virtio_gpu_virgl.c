@@ -100,6 +100,7 @@ static struct {
 } vr;
 
 int hv_metal_texture_read(void *texture, uint32_t *out, uint32_t max_w, uint32_t max_h, uint32_t *w, uint32_t *h); /* virtio_gpu_metal.m */
+IOSurfaceRef hv_metal_texture_surface(void *texture);
 
 /* --- EGL (ANGLE), what is used of it --- */
 typedef void *EGLDisplay, *EGLConfig, *EGLContext;
@@ -201,6 +202,7 @@ typedef struct Res {
     /* As a scanout (SET_SCANOUT_BLOB): the picture's layout in the blob, and virglrenderer's texture of it. */
     uint32_t sw, sh, sformat, sstride, soffset;
     void *tex;
+    IOSurfaceRef surf;       /* the texture's surface, if it has one: shown as it is (hv_gpu_virgl_surface) */
     struct Res *next;
 } Res;
 
@@ -237,6 +239,7 @@ struct HvGpuVirgl {
     uint32_t epoch;                       /* bumped by each reset of the device */
     int reset_req;                        /* the worker is to let go of everything when it reaches reset_at */
     uint32_t reset_at;
+    IOSurfaceRef scan_surf;               /* the scanout blob's surface (its Res's; under present_mu), or NULL */
 };
 
 static void hostmem_unmap(HvGpuVirgl *v, Res *r);
@@ -374,6 +377,16 @@ static int bring_up(HvGpuVirgl *v) {
     return 0;
 }
 
+/* A blob is no longer what it was as a scanout: its texture and surface go. */
+static void scan_forget(HvGpuVirgl *v, Res *r) {
+    pthread_mutex_lock(&v->present_mu);
+    if (v->scan_surf == r->surf) v->scan_surf = NULL;
+    pthread_mutex_unlock(&v->present_mu);
+    if (r->surf) CFRelease(r->surf);
+    if (r->tex && vr.release_handle_for_scanout) vr.release_handle_for_scanout(VIRGL_NATIVE_HANDLE_METAL_TEXTURE, r->tex);
+    r->surf = NULL, r->tex = NULL;
+}
+
 static Res *find(HvGpuVirgl *v, uint32_t id) {
     for (Res *r = v->res; r; r = r->next) if (r->id == id) return r;
     return NULL;
@@ -396,7 +409,7 @@ static void unref(HvGpuVirgl *v, uint32_t id) {
             *p = r->next;
             detach(v, r);
             hostmem_unmap(v, r);
-            if (r->tex && vr.release_handle_for_scanout) vr.release_handle_for_scanout(VIRGL_NATIVE_HANDLE_METAL_TEXTURE, r->tex);
+            scan_forget(v, r);
             vr.resource_unref(id);
             if (v->scanout_res == id) v->scanout_res = 0;
             free(r);
@@ -611,9 +624,9 @@ static int present_flush(HvGpuVirgl *v, Res *r) {
 }
 
 IOSurfaceRef hv_gpu_virgl_surface(HvGpuVirgl *v) {
-    if (!v || !v->present) return NULL;
+    if (!v || (!v->present && !v->g->d3d)) return NULL;
     pthread_mutex_lock(&v->present_mu);
-    IOSurfaceRef s = v->front >= 0 ? v->surf[v->front] : NULL;
+    IOSurfaceRef s = v->g->d3d ? v->scan_surf : v->front >= 0 ? v->surf[v->front] : NULL;
     if (s) CFRetain(s);
     pthread_mutex_unlock(&v->present_mu);
     return s;
@@ -629,6 +642,8 @@ int hv_gpu_virgl_read(HvGpuVirgl *v, uint32_t *out, uint32_t w, uint32_t h) {
     size_t stride = IOSurfaceGetBytesPerRow(s), sw = IOSurfaceGetWidth(s), sh = IOSurfaceGetHeight(s);
     memset(out, 0, (size_t)w * h * 4);
     for (uint32_t y = 0; y < h && y < sh; y++) memcpy(out + (size_t)y * w, base + y * stride, (w < sw ? w : sw) * 4);
+    if (IOSurfaceGetPixelFormat(s) == 'RGBA')
+        for (size_t i = 0, n = (size_t)w * h; i < n; i++) out[i] = (out[i] & 0xff00ff00u) | (out[i] >> 16 & 0xff) | (out[i] & 0xff) << 16;
     IOSurfaceUnlock(s, kIOSurfaceLockReadOnly, NULL);
     CFRelease(s);
     return 1;
@@ -722,7 +737,8 @@ static void display_size(HvGpuVirgl *v, uint32_t w, uint32_t h) {
 static uint32_t flush_blob(HvGpuVirgl *v, Res *r) {
     HvVirtioGpu *g = v->g;
     uint32_t w = 0, h = 0;
-    if (r->tex) {
+    if (r->surf) { /* shown as it is, or copied by whoever wants the pixels (hv_gpu_virgl_read) */
+    } else if (r->tex) {
         if (hv_metal_texture_read(r->tex, g->display, g->width, g->height, &w, &h) != 0) return RESP_ERR_UNSPEC;
         if (w != g->width) { /* narrower than the display: its rows go where the display's stride has them */
             for (uint32_t y = h; y-- > 0;) memmove(g->display + (size_t)y * g->width, g->display + (size_t)y * w, (size_t)w * 4);
@@ -889,6 +905,9 @@ static uint32_t control(HvGpuVirgl *v, Req *q) {
             Res *r = find(v, id);
             display_size(v, sr.w ? sr.w : r->w, sr.h ? sr.h : r->h);
         }
+        pthread_mutex_lock(&v->present_mu);
+        v->scan_surf = NULL; /* not a blob's surface */
+        pthread_mutex_unlock(&v->present_mu);
         v->scanout_res = id;
         g->scanout_res = id;
         g->enabled = id != 0;
@@ -983,20 +1002,30 @@ static uint32_t control(HvGpuVirgl *v, Req *q) {
         if (!c[1]) {
             v->scanout_res = g->scanout_res = 0;
             g->enabled = 0;
+            pthread_mutex_lock(&v->present_mu);
+            v->scan_surf = NULL;
+            pthread_mutex_unlock(&v->present_mu);
             break;
         }
         Res *r = find(v, c[1]);
         if (!r || !r->blob) { type = RESP_ERR_INVALID_RESOURCE_ID; break; }
         if (c[2] < 16 || c[3] < 16 || sr.w < 16 || sr.h < 16 || sr.x + sr.w > c[2] || sr.y + sr.h > c[3]) { type = RESP_ERR_INVALID_PARAMETER; break; }
-        if (r->tex && vr.release_handle_for_scanout) vr.release_handle_for_scanout(VIRGL_NATIVE_HANDLE_METAL_TEXTURE, r->tex);
-        r->tex = NULL;
-        void *handle = NULL;
-        int kind = vr.create_handle_for_scanout ? vr.create_handle_for_scanout(c[1], c[2], c[3], c[4], c[5], stride, offset, &handle) : 0;
-        if (kind == VIRGL_NATIVE_HANDLE_METAL_TEXTURE) r->tex = handle;
-        else if (kind && vr.release_handle_for_scanout) vr.release_handle_for_scanout(kind, handle);
-        if (g->m->log || getenv("HV_GPU_LOG"))
-            fprintf(stderr, "hengevm: virtio-gpu: scanout is blob %u, %ux%u format %u stride %u offset %u: %s\n", c[1], c[2], c[3], c[4],
-                    stride, offset, r->tex ? "a Metal texture" : r->iov ? "the guest's memory" : "NOTHING to show it from");
+        /* Windows flips between a few blobs, one SET_SCANOUT_BLOB a frame: a blob keeps its texture while its
+           layout as a scanout stays what it was. */
+        uint32_t st = stride ? stride : c[2] * 4;
+        if (!r->tex || r->sw != c[2] || r->sh != c[3] || r->sformat != c[4] || r->sstride != st || r->soffset != offset) {
+            scan_forget(v, r);
+            void *handle = NULL;
+            int kind = vr.create_handle_for_scanout ? vr.create_handle_for_scanout(c[1], c[2], c[3], c[4], c[5], stride, offset, &handle) : 0;
+            if (kind == VIRGL_NATIVE_HANDLE_METAL_TEXTURE) r->tex = handle, r->surf = hv_metal_texture_surface(handle);
+            else if (kind && vr.release_handle_for_scanout) vr.release_handle_for_scanout(kind, handle);
+            if (g->m->log || getenv("HV_GPU_LOG"))
+                fprintf(stderr, "hengevm: virtio-gpu: scanout blob %u, %ux%u format %u stride %u offset %u: %s\n", c[1], c[2], c[3], c[4],
+                        stride, offset, r->surf ? "a Metal texture on an IOSurface" : r->tex ? "a Metal texture" : r->iov ? "the guest's memory" : "NOTHING to show it from");
+        }
+        pthread_mutex_lock(&v->present_mu);
+        v->scan_surf = r->surf;
+        pthread_mutex_unlock(&v->present_mu);
         if (!r->tex && !r->iov) { type = RESP_ERR_UNSPEC; break; }
         r->sw = c[2], r->sh = c[3], r->sformat = c[4], r->sstride = stride ? stride : c[2] * 4, r->soffset = offset;
         display_size(v, sr.w, sr.h);
