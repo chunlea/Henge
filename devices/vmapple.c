@@ -239,6 +239,7 @@ static uint64_t tick_locked(HvMachine *m, HvCpu *cpu) {
 
 /* Devices and the GIC are shared by the CPUs: one at a time. */
 uint64_t hv_vmapple_tick(HvMachine *m, HvCpu *cpu) {
+    hv_gicv3_tick(((HvVmapple *)m->tick_opaque)->gic);
     if (cpu->index != 0) return hv_timer_update(((HvVmapple *)m->tick_opaque)->gic, cpu); /* its own timer: the GIC's lock only */
     hv_dev_lock(m);
     uint64_t deadline = tick_locked(m, cpu);

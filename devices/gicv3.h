@@ -43,6 +43,12 @@ typedef struct HvGic {
     uint64_t spi_on[(HV_GIC_NUM_IRQS + 63) / 64]; /* SPIs that may be enabled (a superset: hppi checks each) */
     /* Acknowledges since the last look, by INTID, to say which interrupt it is when one is taken over and
        over (a level-triggered line nothing lowers stops the guest dead, and it cannot say why). */
+    /* A level SPI taken again and again with its line never dropping is held back for a moment each time
+       (hold_until, ns), as a real distributor takes a moment to signal again: the code it interrupted has
+       to run, for it may be what would quiet the device. */
+    uint8_t streak[HV_GIC_NUM_IRQS];
+    uint64_t hold_until[HV_GIC_NUM_IRQS];
+    int held;
     uint32_t acks[HV_GIC_NUM_IRQS];
     uint32_t nacks;
     uint64_t acks_since;
@@ -60,5 +66,7 @@ void hv_gicv3_set_ppi(HvGic *g, int cpu, int intid, int level);
 void hv_gicv3_pend(HvGic *g, int intid);
 /* Recompute every CPU's IRQ and FIQ inputs (waking any that just got one). */
 void hv_gicv3_update(HvGic *g);
+/* The board's tick: interrupts held back whose moment has passed are signalled. */
+void hv_gicv3_tick(HvGic *g);
 
 #endif

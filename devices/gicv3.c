@@ -47,6 +47,12 @@ static int target_of(HvGic *g, int i) {
     return c < ncpus(g) ? c : 0;
 }
 
+static uint64_t now_ns(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
+}
+
 /* CPU c's highest-priority pending interrupt; with `masked`, only one PMR and the running priority let through. */
 static int hppi(HvGic *g, int c, int masked) {
     int best = SPURIOUS, best_prio = 0x100;
@@ -65,6 +71,10 @@ static int hppi(HvGic *g, int c, int masked) {
             if (i < 32 || i >= HV_GIC_NUM_IRQS) continue;
             if (!g->enabled[i] || g->active[i] || !pending(g, c, i)) continue;
             if (target_of(g, i) != c) continue;
+            if (g->hold_until[i]) {
+                if (now_ns() < g->hold_until[i]) continue;
+                g->hold_until[i] = 0;
+            }
             if (!group_enabled(g, c, g->group[i])) continue;
             if (g->priority[i] < best_prio) {
                 best = i;
@@ -93,6 +103,7 @@ static void hv_gicv3_set_irq_body(HvGic *g, int intid, int level) {
     level = level != 0;
     if (g->level[intid] == level) return; /* nothing changed: skip the rescan */
     if (g->edge[intid] && level) g->latch[intid] = 1;
+    if (!level) g->streak[intid] = 0, g->hold_until[intid] = 0;
     g->level[intid] = (uint8_t)level;
     hv_gicv3_update(g);
 }
@@ -123,6 +134,13 @@ static uint64_t acknowledge(HvGic *g, int c, int grp) {
     HvGicCpu *k = &g->cpu[c];
     if (k->depth < 32) k->stack[k->depth++] = (HvGicActive){(uint16_t)i, F(g, c, priority, i), (uint8_t)grp};
     g->acks[i]++;
+    /* The eighth time running with its line still up: from here it waits 200 us before each next time
+       (hv_gicv3_tick signals it, so nearer a millisecond). */
+    if (i >= 32 && !g->edge[i] && g->level[i] && ++g->streak[i] >= 8) {
+        g->streak[i] = 8;
+        g->hold_until[i] = now_ns() + 200000;
+        g->held = 1;
+    }
     if (++g->nacks == 1u << 19) { /* half a million: in under two seconds, one interrupt taking most of them is a storm */
         struct timespec ts;
         clock_gettime(CLOCK_MONOTONIC, &ts);
@@ -405,6 +423,16 @@ static void redist_write_body(void *opaque, uint64_t off, uint64_t v, unsigned s
    Devices call in holding the device lock; the CPUs' ICC registers and timers do not need it. */
 void hv_gicv3_update(HvGic *g) {
     pthread_mutex_lock(&g->mu);
+    hv_gicv3_update_body(g);
+    pthread_mutex_unlock(&g->mu);
+}
+
+void hv_gicv3_tick(HvGic *g) {
+    if (!g || !g->held) return;
+    pthread_mutex_lock(&g->mu);
+    g->held = 0;
+    for (int i = 32; i < HV_GIC_NUM_IRQS; i++)
+        if (g->hold_until[i]) g->held = 1;
     hv_gicv3_update_body(g);
     pthread_mutex_unlock(&g->mu);
 }
