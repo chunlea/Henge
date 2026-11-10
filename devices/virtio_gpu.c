@@ -306,8 +306,8 @@ HvVirtioGpu *hv_virtio_gpu_create_d3d(HvMachine *m, HvPcie *bus, uint32_t width,
 
 void hv_virtio_gpu_want_size(HvVirtioGpu *g, uint32_t width, uint32_t height) {
     if (!g || !g->d3d) return;
-    width = (width < 640 ? 640 : width > GPU_MAX_W ? GPU_MAX_W : width) & ~7u;
-    height = (height < 480 ? 480 : height > GPU_MAX_H ? GPU_MAX_H : height) & ~7u;
+    width = (width < 640 ? 640 : width > GPU_MAX_W ? GPU_MAX_W : width) & ~1u;
+    height = (height < 480 ? 480 : height > GPU_MAX_H ? GPU_MAX_H : height) & ~1u;
     if (width == g->want_w && height == g->want_h) return;
     g->want_w = width, g->want_h = height;
     uint32_t events;

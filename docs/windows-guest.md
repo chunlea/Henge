@@ -117,8 +117,10 @@ scanout at every flip, so a blob keeps its texture from one frame to the next.
 
 The host can ask for another size (`hv_vm_display_wanted`; `resize W H` in hengevm's input file; the iOS
 session asks for the machine's width in the shape of the room it has): the device raises its display event,
-the driver asks again for the display's information and EDID, and its helper service in Windows (vgpusrv)
-changes the resolution.
+the driver asks again for the display's information and adds that size to what Windows offers
+(Settings, System, Display), where choosing it changes the picture at once. The driver's helper in Windows
+(vgpusrv, viogpuap) is meant to apply it by itself and runs, but did not here: not looked into. The driver
+does not take the device's EDID feature, so 1024x768 is what Windows calls recommended.
 
 Installing the driver, once, in Windows: UTM's guest tools disc as the CD-ROM
 (`--cdrom utm-guest-tools-0.1.275.iso`; the iOS app downloads it in the machine's settings), then, in a

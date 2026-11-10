@@ -490,7 +490,7 @@ struct WindowsSettingsView: View {
                     Text(EngineTuning.windowsGPU == nil
                          ? "This build of Henge has no GPU frameworks for Windows (ios/scripts/fetch_virgl.sh)."
                          : machine.gpuDriver == true
-                         ? "Windows has the driver: the GPU is its only screen, and nothing shows while it starts, until the driver does. If the screen stays black, turn this off and on again: Windows starts on the firmware's screen once more."
+                         ? "Windows has the driver: the GPU is its only screen, and nothing shows while it starts, until the driver does. The size that fits this session is offered to Windows as it changes: choose it in Windows' Settings, System, Display. If the screen stays black, turn this off and on again: Windows starts on the firmware's screen once more."
                          : "Windows uses it once UTM's Direct3D 11 driver is installed in it (experimental: some of Windows' own interface is drawn with pieces missing). Until then, and with this off, Windows draws with the emulated CPUs.")
                         .font(.system(size: 13)).foregroundStyle(Desk.dim)
                     if FileManager.default.fileExists(atPath: machine.tools.path) {
