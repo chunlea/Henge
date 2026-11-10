@@ -145,6 +145,9 @@ its Details type what Setup needs: the LabConfig settings above, and `oobe\bypas
 - A restart ends `hengevm`: it has to be started again (a shell loop does). The
   firmware then starts Windows Boot Manager from the disk, whose entry Windows wrote to
   the firmware's variables.
-- Now and then (one start in ten, with ten machines starting at once) Windows stops with a bug check
-  soon after its desktop comes up, and restarts. Not looked into yet.
+- Rarely (two starts in about sixty, with ten or twelve machines starting at once, both on the engine
+  merged with the Linux branch) Windows stops with a bug check soon after its desktop comes up, the
+  kernel following a pointer that is not one, and restarts. Not explained.
+- The network card's port is suspended by Windows when idle, and nothing wakes it from the host's
+  side: what the guest starts gets through, a connection in to an idle guest would not.
 - Seen once under heavy host load: `hengevm` processes that did not exit on SIGTERM.
