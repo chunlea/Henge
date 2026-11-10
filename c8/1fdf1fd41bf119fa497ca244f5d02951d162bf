@@ -1,0 +1,21 @@
+ios/Henge/Autopilot.swift
+  s_44a1f27d01493a::t_cb040cdd8efa54 24-25,157-166
+ios/Henge/WindowsView.swift
+  s_44a1f27d01493a::t_2b3802a1f224ac 60,79,81-83,129-140
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "c81fdf1fd41bf119fa497ca244f5d02951d162bf",
+  "prompts": {},
+  "sessions": {
+    "s_44a1f27d01493a": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c642-9cc0-7172-a74d-0fa5d98fdbe6",
+        "model": "gpt-6-luna"
+      },
+      "human_author": "chunli <git@chunli.dev>"
+    }
+  }
+}

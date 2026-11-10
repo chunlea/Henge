@@ -1,0 +1,23 @@
+host/vm.c
+  s_be58c8822e297c::t_ea4ee009bb514e 733-740
+ios/Henge/SessionView.swift
+  s_be58c8822e297c::t_b8d12cf4c6a2bd 529-541
+ios/Henge/WindowsView.swift
+  s_be58c8822e297c::t_eabfe4c122dfac 39-48
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "907e588af493ccd9af3e8660e7ac472eb2cf0052",
+  "prompts": {},
+  "sessions": {
+    "s_be58c8822e297c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "460830a0-c917-44aa-9aea-92d45fd794ef",
+        "model": "unknown"
+      },
+      "human_author": "chunli <git@chunli.dev>"
+    }
+  }
+}

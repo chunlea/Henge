@@ -1,0 +1,25 @@
+host/main.c
+  s_be58c8822e297c::t_8fbd0bec9e1651 532,551-555
+devices/gicv3.c
+  s_be58c8822e297c::t_5593da537706af 50-55,74-77,106,137-143,428-437
+devices/gicv3.h
+  s_be58c8822e297c::t_f95954ffef3794 46-51,69-70
+devices/vmapple.c
+  s_be58c8822e297c::t_2cca7e0cc2ff38 242
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "c17913815892a9b81cde893681e5f2532c0256bb",
+  "prompts": {},
+  "sessions": {
+    "s_be58c8822e297c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "460830a0-c917-44aa-9aea-92d45fd794ef",
+        "model": "unknown"
+      },
+      "human_author": "chunli <git@chunli.dev>"
+    }
+  }
+}
