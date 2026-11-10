@@ -1,0 +1,41 @@
+devices/xhci.c
+  s_ebdaab21a75832::t_1131fe813b7ef5 129-173,178,182-187,371-372,379,390,406,410-412,429-431,468,598-948,967,1111-1117,1119-1120,1176-1181,1194,1196,1209-1210,1226,1268,1300,1337,1346-1347,1544-1558,1561-1565,1568,1571-1576,1593-1595
+devices/xhci.h
+  s_8c78c10c465712::t_27a932e1e34e62 6,17-18,20-25,51-54,70-73,101-115,119-123
+devices/virt.c
+  s_be58c8822e297c::t_1a9d14dc59357c 75-80
+devices/vmapple.c
+  s_be58c8822e297c::t_3b5a2bf4f1c9f2 383
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "eaa6f91799a44662d5f02865bf5527ea43dd9fc0",
+  "prompts": {},
+  "sessions": {
+    "s_8c78c10c465712": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "eafea5fd-aa24-43fe-89eb-7105f6b20466",
+        "model": "claude-fable-5-2"
+      },
+      "human_author": "chunli <git@chunli.dev>"
+    },
+    "s_be58c8822e297c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "460830a0-c917-44aa-9aea-92d45fd794ef",
+        "model": "unknown"
+      },
+      "human_author": "chunli <git@chunli.dev>"
+    },
+    "s_ebdaab21a75832": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "718d1191-bcb2-4305-bbb0-5bbc8ddb1a31",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "chunli <git@chunli.dev>"
+    }
+  }
+}
