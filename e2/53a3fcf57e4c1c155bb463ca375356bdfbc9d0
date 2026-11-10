@@ -1,0 +1,23 @@
+core/classify.c
+  s_be58c8822e297c::t_29c563a43e53f0 40-42
+tests/classify_cases.s
+  s_be58c8822e297c::t_affafb99a2bf64 51
+tests/test_classify.c
+  s_be58c8822e297c::t_dcc30e0a29d16c 25
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "e253a3fcf57e4c1c155bb463ca375356bdfbc9d0",
+  "prompts": {},
+  "sessions": {
+    "s_be58c8822e297c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "460830a0-c917-44aa-9aea-92d45fd794ef",
+        "model": "unknown"
+      },
+      "human_author": "chunli <git@chunli.dev>"
+    }
+  }
+}
