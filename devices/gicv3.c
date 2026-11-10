@@ -1,8 +1,10 @@
 #include "gicv3.h"
 
 #include <pthread.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 /* Register layout follows the GICv3 architecture specification (IHI 0069);
    behaviour is checked against QEMU's hw/intc/arm_gicv3*. */
@@ -120,6 +122,22 @@ static uint64_t acknowledge(HvGic *g, int c, int grp) {
     F(g, c, latch, i) = 0;
     HvGicCpu *k = &g->cpu[c];
     if (k->depth < 32) k->stack[k->depth++] = (HvGicActive){(uint16_t)i, F(g, c, priority, i), (uint8_t)grp};
+    g->acks[i]++;
+    if (++g->nacks == 1u << 19) { /* half a million: in under two seconds, one interrupt taking most of them is a storm */
+        struct timespec ts;
+        clock_gettime(CLOCK_MONOTONIC, &ts);
+        uint64_t now = (uint64_t)ts.tv_sec * 1000 + (uint64_t)ts.tv_nsec / 1000000;
+        int top = 0;
+        for (int n = 1; n < HV_GIC_NUM_IRQS; n++)
+            if (g->acks[n] > g->acks[top]) top = n;
+        if (now - g->acks_since < 2000 && g->acks[top] > g->nacks / 2)
+            fprintf(stderr, "hengevm: interrupt storm: INTID %d taken %u times in %llu ms on CPU %d (%s, line %d, latch %d)\n", top,
+                    g->acks[top], (unsigned long long)(now - g->acks_since), c, F(g, c, edge, top) ? "edge" : "level",
+                    F(g, c, level, top), F(g, c, latch, top));
+        memset(g->acks, 0, sizeof g->acks);
+        g->nacks = 0;
+        g->acks_since = now;
+    }
     hv_gicv3_update(g);
     return (uint64_t)i;
 }

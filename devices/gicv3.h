@@ -41,6 +41,11 @@ typedef struct HvGic {
     uint8_t edge[HV_GIC_NUM_IRQS];   /* ICFGR: 1 = edge-triggered */
     uint64_t route[HV_GIC_NUM_IRQS];
     uint64_t spi_on[(HV_GIC_NUM_IRQS + 63) / 64]; /* SPIs that may be enabled (a superset: hppi checks each) */
+    /* Acknowledges since the last look, by INTID, to say which interrupt it is when one is taken over and
+       over (a level-triggered line nothing lowers stops the guest dead, and it cannot say why). */
+    uint32_t acks[HV_GIC_NUM_IRQS];
+    uint32_t nacks;
+    uint64_t acks_since;
     HvGicCpu cpu[HV_MAX_CPUS];
 } HvGic;
 

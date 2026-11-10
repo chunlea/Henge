@@ -73,9 +73,15 @@ static int prp_xfer(HvNvme *n, uint64_t prp1, uint64_t prp2, uint8_t *buf, uint6
     }
 }
 
-static void post(HvNvme *n, int sqid, uint16_t cid, int status, uint32_t result) {
+/* A completion into the queue its submission queue names. 0: that queue is full (every entry but one holds
+   something the driver has not yet said it has seen), and the completion has to wait: writing on would go
+   round past the driver's place, and with the phase bit the wrong way from there on it sees nothing new
+   again, while the interrupt stays up for what it never took (Windows, several submission queues to one
+   completion queue: an interrupt taken a million times a second, and DPC_WATCHDOG_VIOLATION). */
+static int post(HvNvme *n, int sqid, uint16_t cid, int status, uint32_t result) {
     HvNvmeQueue *sq = &n->sq[sqid], *cq = &n->cq[sq->cqid];
-    if (!cq->base) return;
+    if (!cq->base) return 1; /* a queue that is gone: nobody to tell */
+    if ((cq->tail + 1) % cq->size == cq->head) return 0;
     uint8_t e[16] = {0};
     put32(e, result);
     put16(e + 8, (uint16_t)sq->head);
@@ -86,10 +92,11 @@ static void post(HvNvme *n, int sqid, uint16_t cid, int status, uint32_t result)
        and the bit is what tells it the entry (and the command id beside it) is there. */
     uint64_t at = cq->base + (uint64_t)cq->tail * 16;
     uint32_t *last = hv_phys_ptr(n->m, at + 12, 4);
-    if (!last) return;
+    if (!last) return 1;
     hv_phys_write(n->m, at, e, 12);
     __atomic_store_n(last, get32(e + 12), __ATOMIC_RELEASE);
     if (++cq->tail == cq->size) cq->tail = 0, cq->phase ^= 1;
+    return 1;
 }
 
 static void drain(HvNvme *n);
@@ -158,6 +165,7 @@ static int admin(HvNvme *n, const uint8_t *c, uint32_t *result) {
         if ((cdw11 >> 16) > HV_NVME_QUEUES || !n->cq[cdw11 >> 16].base) return SC_BAD_QUEUE;
         if (qsize < 2) return SC_BAD_QUEUE_SIZE;
         n->sq[qid] = (HvNvmeQueue){.base = get64(c + 24) & ~(uint64_t)(n->page - 1), .size = qsize, .cqid = (uint16_t)(cdw11 >> 16)};
+        if (n->m->log >= 2) fprintf(stderr, "hengevm: nvme: submission queue %u, %u entries, completions to queue %u\n", qid, qsize, cdw11 >> 16);
         return SC_OK;
     case 0x04: /* delete a completion queue */
         if (!qid || qid > HV_NVME_QUEUES || !n->cq[qid].base) return SC_BAD_QUEUE;
@@ -167,6 +175,7 @@ static int admin(HvNvme *n, const uint8_t *c, uint32_t *result) {
         if (!qid || qid > HV_NVME_QUEUES || n->cq[qid].base) return SC_BAD_QUEUE;
         if (qsize < 2) return SC_BAD_QUEUE_SIZE;
         n->cq[qid] = (HvNvmeQueue){.base = get64(c + 24) & ~(uint64_t)(n->page - 1), .size = qsize, .ien = (cdw11 >> 1) & 1, .phase = 1};
+        if (n->m->log >= 2) fprintf(stderr, "hengevm: nvme: completion queue %u, %u entries%s\n", qid, qsize, (cdw11 >> 1) & 1 ? ", with interrupts" : "");
         return SC_OK;
     case 0x02: { /* a log page: no errors, a healthy disk, firmware in slot 1 */
         static uint8_t zeros[4096];
@@ -273,7 +282,10 @@ static void run(HvNvme *n, int qid) {
             n->errors++;
             if (n->m->log) fprintf(stderr, "hengevm: nvme: admin command %02x failed (status %x)\n", c[0], status & 0x7ff);
         }
-        if (status != SC_NO_COMPLETION) post(n, qid, (uint16_t)(c[2] | c[3] << 8), status, result);
+        /* The admin queue takes one command at a time from every driver seen; one whose completion found no
+           room would be lost. */
+        if (status != SC_NO_COMPLETION && !post(n, qid, (uint16_t)(c[2] | c[3] << 8), status, result) && n->m->log)
+            fprintf(stderr, "hengevm: nvme: no room for the completion of admin command %02x\n", c[0]);
     }
     if (handed) pthread_cond_signal(&n->cv);
     update_irq(n);
@@ -286,11 +298,11 @@ void hv_nvme_poll(HvNvme *n) {
     for (uint32_t i = n->posted; i != n->submitted; i++) {
         HvNvmeReq *r = &n->ring[i % HV_NVME_RING];
         if (r->posted || !__atomic_load_n(&r->done, __ATOMIC_ACQUIRE)) continue;
+        if (!post(n, r->sqid, (uint16_t)(r->cmd[2] | r->cmd[3] << 8), r->status, 0)) continue; /* its queue is full: later */
         if (r->status != SC_OK) {
             n->errors++;
             if (n->m->log) fprintf(stderr, "hengevm: nvme: i/o command %02x failed (status %x)\n", r->cmd[0], r->status & 0x7ff);
         }
-        post(n, r->sqid, (uint16_t)(r->cmd[2] | r->cmd[3] << 8), r->status, 0);
         r->posted = 1;
         any = 1;
     }
@@ -345,8 +357,9 @@ static void bar_write(HvPciDev *d, int bar, uint64_t off, uint64_t v, unsigned s
     if (off >= DOORBELLS) {
         uint32_t i = (uint32_t)(off - DOORBELLS) / 4, qid = i / 2;
         if (qid > HV_NVME_QUEUES || !(n->csts & 1)) return;
-        if (i & 1) { /* a completion queue's head: entries up to it have been seen */
+        if (i & 1) { /* a completion queue's head: entries up to it have been seen, and there is room for as many */
             if (n->cq[qid].base && (uint32_t)v < n->cq[qid].size) n->cq[qid].head = (uint32_t)v;
+            hv_nvme_poll(n);
             update_irq(n);
         } else if (n->sq[qid].base && (uint32_t)v < n->sq[qid].size) {
             n->sq[qid].tail = (uint32_t)v;
