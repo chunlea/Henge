@@ -526,6 +526,19 @@ struct SessionView: View {
                         .font(.footnote).foregroundStyle(.secondary)
                 }
                 }
+                if mac.isWindows {
+                Section("Larger Screen") {
+                    Button("Type the Larger Screen Command") {
+                        showDetails = false
+                        Task {
+                            try? await Task.sleep(nanoseconds: 600_000_000)
+                            await WindowsSetup.typeHere(WindowsSetup.largerScreen)
+                        }
+                    }
+                    Text("Windows has no display driver for this machine, so its Settings cannot change the screen's size: it keeps the one its boot manager chose, 800 × 600 unless told otherwise. In Windows, open Terminal or Command Prompt as administrator, tap this, and restart Windows: the screen is 1024 × 768 from then on, the largest the firmware offers.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
+                }
                 if mac.isMac {
                 Section("Sharing") {
                     LabeledContent("Clipboard and folder", value: helperRunning ? "On" : "Not set up")

@@ -36,6 +36,16 @@ enum WindowsSetup {
         .map { "reg add HKLM\\SYSTEM\\Setup\\LabConfig /v \($0) /t REG_DWORD /d 1 /f" }
         .joined(separator: " & ") + " & exit\n"
     static let noNetwork = "oobe\\bypassnro\n"
+    /// Windows' boot manager picks the display's size, from what the firmware offers: the largest is 1024 x 768.
+    static let largerScreen = "bcdedit /set {globalsettings} highestmode on\n"
+
+    /// Typed into a window that is open already.
+    @MainActor static func typeHere(_ command: String) async {
+        for c in command {
+            Keys.type(c)
+            try? await Task.sleep(nanoseconds: 60_000_000)
+        }
+    }
 
     /// Shift-F10 opens Setup's command prompt; then the command, a key at a time (a USB keyboard's reports
     /// reach Windows one every few milliseconds).
