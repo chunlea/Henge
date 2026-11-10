@@ -751,7 +751,14 @@ void hv_vm_mouse_button(int button, int down) {
 /* The guest takes a wheel event as 8 bits: -200 arrives as +56, the wrong way. So big moves go in pieces. */
 static void wheel(uint16_t axis, int amount) {
     if (board.fwcfg) { /* the tablet has one wheel */
-        if (axis == HV_REL_WHEEL) tab_move(0, 0, amount > 127 ? 127 : amount < -127 ? -127 : amount);
+        /* The host UI's wheel units are what macOS scrolls smoothly by, many each moment of a swipe. A notch
+           of this wheel is three lines in Windows: one for every 40 units. */
+        static int units;
+        if (axis != HV_REL_WHEEL) return;
+        units += amount;
+        int notches = units / 40;
+        units -= notches * 40;
+        if (notches) tab_move(0, 0, notches > 127 ? 127 : notches < -127 ? -127 : notches);
         return;
     }
     while (amount) {
