@@ -1,0 +1,31 @@
+Makefile
+  s_be58c8822e297c::t_ccf2ce29e275ee 10
+devices/nvme.c
+  s_be58c8822e297c::t_c69e5cdc3ab453 1-323
+devices/nvme.h
+  s_be58c8822e297c::t_7be010b359e7e9 1-44
+devices/virt.c
+  s_be58c8822e297c::t_c83cb467c62f3f 70-74
+devices/virt.h
+  s_be58c8822e297c::t_599b9f288a70e5 7,44
+devices/vmapple.c
+  s_be58c8822e297c::t_2b709bbc43a853 396
+devices/vmapple.h
+  s_be58c8822e297c::t_6becf28a197d06 91
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "003cc2032f0e72c5ae5ef5d1b33242ffb698f285",
+  "prompts": {},
+  "sessions": {
+    "s_be58c8822e297c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "460830a0-c917-44aa-9aea-92d45fd794ef",
+        "model": "unknown"
+      },
+      "human_author": "chunli <git@chunli.dev>"
+    }
+  }
+}
