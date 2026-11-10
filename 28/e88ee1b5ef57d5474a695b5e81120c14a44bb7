@@ -1,0 +1,23 @@
+ios/Henge/Native/henge-vm.c
+  s_862d92eac8a50c::t_2fd0677864b95d 66-67,87
+ios/Henge/SessionView.swift
+  s_862d92eac8a50c::t_6214eacaf49091 68,103,137,171,460,473,493,506,509,544,594,674
+ios/Henge/StoppedMacView.swift
+  s_862d92eac8a50c::t_08276345c4ec78 7,11-12,15-18,23-24,27-28,38
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "28e88ee1b5ef57d5474a695b5e81120c14a44bb7",
+  "prompts": {},
+  "sessions": {
+    "s_862d92eac8a50c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2a2ea67b-10a4-470a-aa9f-ca4aec62a749",
+        "model": "unknown"
+      },
+      "human_author": "chunli <git@chunli.dev>"
+    }
+  }
+}
