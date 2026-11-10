@@ -693,7 +693,10 @@ int hv_mem_emulate(HvCpu *cpu, uint32_t insn, uint64_t pc) {
         rc = do_vector(cpu, &op, va, el, pc);
         break;
     default: {
-        if (op.align && (va & (op.bytes - 1))) return alignment_fault(cpu, va, op.store, pc);
+        /* LDAR and STLR off their natural alignment: allowed as on the host's CPU (FEAT_LSE2), unless SCTLR_EL1.A
+           asks for the check or the access crosses a 16-byte boundary. */
+        if (op.align && (va & (op.bytes - 1)) && ((cpu->sctlr_el1 >> 1 & 1) || (va & 15) + op.bytes > 16))
+            return alignment_fault(cpu, va, op.store, pc);
         int pair = op.kind == HV_MEM_PAIR;
         uint32_t esize = 1u << op.size;
         uint8_t buf[32] = {0};

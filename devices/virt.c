@@ -14,6 +14,29 @@ static void pio_write(void *opaque, uint64_t off, uint64_t v, unsigned size) {
     (void)opaque, (void)off, (void)v, (void)size;
 }
 
+static uint32_t be32(const uint8_t *p) { return (uint32_t)p[0] << 24 | p[1] << 16 | p[2] << 8 | p[3]; }
+
+/* etc/ramfb was written: {u64 address, u32 fourcc, u32 flags, u32 width, u32 height, u32 stride}, big-endian.
+   Called with the device lock held, which is what a reader of the fb_ fields takes (host/vm.c). */
+static void ramfb_written(void *opaque) {
+    HvVmapple *b = opaque;
+    const uint8_t *c = hv_fw_cfg_find(b->fwcfg, "etc/ramfb")->data;
+    uint64_t addr = (uint64_t)be32(c) << 32 | be32(c + 4);
+    uint32_t fourcc = be32(c + 8), width = be32(c + 16), height = be32(c + 20), stride = be32(c + 24);
+    if (!stride) stride = width * 4;
+    uint64_t size = (uint64_t)stride * height;
+    b->fb_size = 0;
+    /* XRGB8888 ("XR24") is the only format the firmware asks for. */
+    if (fourcc != 0x34325258 || !width || !height || width > 8192 || height > 8192 || stride < width * 4 ||
+        addr < b->mem_base || addr - b->mem_base + size > b->ram_size) {
+        if (b->m->log) fprintf(stderr, "hengevm: ramfb: %ux%u at %llx (format %08x) cannot be shown\n", width, height,
+                               (unsigned long long)addr, fourcc);
+        return;
+    }
+    b->fb_base = addr, b->fb_width = width, b->fb_height = height, b->fb_stride = stride, b->fb_size = size;
+    if (b->m->log) fprintf(stderr, "hengevm: ramfb: %ux%u at %llx\n", width, height, (unsigned long long)addr);
+}
+
 /* EDK2's driver for virtio 1.0 devices takes only those whose PCI subsystem id is 0x40 or more, as the
    specification says of devices that are not transitional. QEMU's have 0x1100; the virtual Mac's keep the
    device type there, which is what macOS has always been shown. */
@@ -40,15 +63,18 @@ int hv_virt_create(HvVmapple *b, HvMachine *m, HvCpu *cpus, const HvVirtParams *
     b->uart = hv_pl011_create(m, b->gic, VIRT_UART, 32 + VIRT_IRQ_UART);
     b->rtc = hv_pl031_create(m, b->gic, VIRT_RTC, 32 + VIRT_IRQ_RTC);
     b->fwcfg = hv_fw_cfg_create(m, VIRT_FW_CFG, b->ncpus);
+    hv_fw_cfg_add_file(b->fwcfg, "etc/ramfb", NULL, 28, ramfb_written, b);
     b->pcie = hv_pcie_create(m, b->gic, VIRT_PCIE_ECAM, VIRT_PCIE_ECAM_SIZE, VIRT_PCIE_MMIO, VIRT_PCIE_MMIO_SIZE,
                              32 + VIRT_IRQ_PCIE);
     hv_machine_add_mmio(m, VIRT_PCIE_PIO, 0x10000, b, pio_read, pio_write, "pcie-pio");
     if (p->disk && !(b->root_blk = hv_virtio_blk_create(m, b->pcie, p->disk, HV_VBLK_PLAIN))) return -1;
+    if (p->cdrom && !(b->aux_blk = hv_virtio_blk_create(m, b->pcie, p->cdrom, HV_VBLK_PLAIN))) return -1;
     if (p->mac) b->net = hv_virtio_net_create(m, b->pcie, p->mac);
     b->keyboard = hv_virtio_input_create(m, b->pcie, HV_VINPUT_KEYBOARD);
     b->mouse = hv_virtio_input_create(m, b->pcie, HV_VINPUT_MOUSE);
 
     standard_ids(b->root_blk ? &b->root_blk->vio : NULL);
+    standard_ids(b->aux_blk ? &b->aux_blk->vio : NULL);
     standard_ids(b->net ? &b->net->vio : NULL);
     standard_ids(&b->keyboard->vio);
     standard_ids(&b->mouse->vio);

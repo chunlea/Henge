@@ -83,6 +83,7 @@ typedef struct HvVmapple {
        guest RAM, left out of the memory the guest is told about. 0 for macOS. */
     uint64_t fb_base, fb_size;
     uint32_t fb_width, fb_height;
+    uint32_t fb_stride;      /* bytes a row; 0: fb_width * 4 */
     HvVirtioGpu *gpu;        /* Linux's display, drawing into the framebuffer memory (NULL: a simple-framebuffer there) */
     uint64_t mem_base;       /* where guest RAM starts: VMAPPLE_MEM, or VIRT_MEM on the UEFI board (devices/virt.h) */
     /* The UEFI board only: */

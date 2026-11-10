@@ -58,6 +58,7 @@ static int el0_allowed(HvCpu *cpu, uint32_t reg, int write) {
     case R(3, 3, 13, 0, 3): return !write;                               /* TPIDRRO_EL0 */
     case R(3, 3, 0, 0, 1): return !write && ((cpu->sctlr_el1 >> 15) & 1); /* CTR_EL0: UCT */
     case R(3, 3, 0, 0, 7): return !write;                                /* DCZID_EL0 */
+    case R(3, 3, 9, 13, 0): return !write;                               /* PMCCNTR_EL0: Windows lets its programs read it (PMUSERENR) */
     case R(3, 3, 14, 0, 0): return !write && (k & 3);                    /* CNTFRQ */
     case R(3, 3, 14, 0, 1): case R(3, 3, 14, 0, 5): return !write && (k & 1);       /* CNTPCT */
     case R(3, 3, 14, 0, 2): case R(3, 3, 14, 0, 6): return !write && ((k >> 1) & 1); /* CNTVCT */
@@ -146,7 +147,19 @@ static int read_reg(HvCpu *cpu, uint32_t reg, uint64_t *v) {
         *v = m->icc_read ? m->icc_read(m, cpu, reg) : 0; /* the GIC locks itself */
         return 0;
     }
-    /* The rest of the ID space reads as zero; so do debug and PMU registers. */
+    /* PMCCNTR_EL0, the PMU's cycle counter. There is no PMU (ID_AA64DFR0), but Windows' boot manager and
+       loader time themselves with it whatever the ID register says, and wait forever on one that stands
+       still: a clock at 100 cycles a timer tick (2.4 GHz). */
+    if (reg == R(3, 3, 9, 13, 0)) {
+        *v = now * 100;
+        return 0;
+    }
+    /* The rest of the ID space reads as zero; so do debug and PMU registers (PMEVCNTRn, PMEVTYPERn and
+       PMCCFILTR are the PMU's in CRn 14). */
+    if ((reg >> 14) == 3 && ((reg >> 11) & 7) == 3 && ((reg >> 7) & 15) == 14 && ((reg >> 3) & 15) >= 8) {
+        *v = 0;
+        return 0;
+    }
     if ((reg >> 14) == 3 && ((reg >> 11) & 7) == 0 && ((reg >> 7) & 15) == 0 && ((reg >> 3) & 15) >= 1) {
         *v = 0;
         return 0;
@@ -263,6 +276,7 @@ other:
     }
     /* Debug and PMU registers: ignored. */
     if ((reg >> 14) == 2 || (((reg >> 7) & 15) == 9 && (reg >> 14) == 3)) return 0;
+    if ((reg >> 14) == 3 && ((reg >> 11) & 7) == 3 && ((reg >> 7) & 15) == 14 && ((reg >> 3) & 15) >= 8) return 0;
     /* Apple implementation-defined registers (op0 3, CRn 15): ignored, see read_reg. */
     if ((reg >> 14) == 3 && ((reg >> 7) & 15) == 15) {
         if (m->log) fprintf(stderr, "hengevm: write to implementation-defined S3_%u_C15_C%u_%u ignored\n", (reg >> 11) & 7,

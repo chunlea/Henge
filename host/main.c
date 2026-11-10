@@ -915,7 +915,7 @@ static void usage(void) {
     fprintf(stderr, "usage: hengevm --rom FILE --disk FILE --aux FILE --ecid N [--seed N] [--ram MB] [--log N] [--trace 1] [--screenshot PNG] [--watch VA] [--stats SECONDS [--profile 1]] [--cpus N] [--window] [--no-pvg] [--no-chain] [--break PC [--break-hits N]] [--dump PA LEN FILE] [--aux-offset BYTES] [--install IPSW]\n"
                     "       hengevm --linux KERNEL [--initrd FILE] [--append CMDLINE] [--disk FILE] [--ram MB] [--cpus N] [--window]\n"
                     "       hengevm --linux-disk --disk FILE [--append-extra ARGS] [--ram MB] [--cpus N] [--window]\n"
-                    "       hengevm --uefi FIRMWARE [--uefi-vars FILE] [--disk FILE] [--ram MB] [--cpus N]\n");
+                    "       hengevm --uefi FIRMWARE [--uefi-vars FILE] [--disk FILE] [--cdrom FILE] [--ram MB] [--cpus N]\n");
     exit(2);
 }
 
@@ -978,7 +978,7 @@ int main(int argc, char **argv) {
     const char *rom = NULL, *disk_path = NULL, *aux_path = NULL;
     const char *linux_kernel = NULL, *linux_initrd = NULL, *linux_cmdline = NULL, *linux_extra = NULL;
     int linux_from_disk = 0;
-    const char *uefi_code = NULL, *uefi_vars = NULL;
+    const char *uefi_code = NULL, *uefi_vars = NULL, *cdrom = NULL;
     uint64_t seed = 0, ecid = 0, ram_mb = 4096, aux_offset = 16384;
     const char *install_ipsw = NULL;
     const char *share_folder = NULL;
@@ -1023,6 +1023,7 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--linux-disk")) linux_from_disk = 1; /* Linux, from the --disk's own boot entry */
         else if (!strcmp(argv[i], "--uefi")) uefi_code = argv[++i]; /* a guest started by UEFI firmware (edk2-aarch64-code.fd) */
         else if (!strcmp(argv[i], "--uefi-vars")) uefi_vars = argv[++i];
+        else if (!strcmp(argv[i], "--cdrom")) cdrom = argv[++i];
         else if (!strcmp(argv[i], "--append-extra")) linux_extra = argv[++i];
         else if (!strcmp(argv[i], "--initrd")) linux_initrd = argv[++i];
         else if (!strcmp(argv[i], "--append")) linux_cmdline = argv[++i];
@@ -1061,7 +1062,7 @@ int main(int argc, char **argv) {
                      .installer = install_ipsw != NULL,
                      .linux_kernel = linux_kernel, .linux_initrd = linux_initrd, .linux_cmdline = linux_cmdline,
                      .linux_from_disk = linux_from_disk, .linux_extra = linux_extra,
-                     .uefi_code = uefi_code, .uefi_vars = uefi_vars};
+                     .uefi_code = uefi_code, .uefi_vars = uefi_vars, .cdrom = cdrom};
     if (getenv("HV_JIT_MB")) vc.jit_bytes = (size_t)atoi(getenv("HV_JIT_MB")) << 20; /* debugging: a small region flushes often */
     hv_prof_register = hv_prof_register_thread;
     char err[256];

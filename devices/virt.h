@@ -33,10 +33,15 @@
 #define VIRT_IRQ_RTC 2
 #define VIRT_IRQ_PCIE 0x20 /* slot s raises this + s (devices/pcie.c) */
 
+/* The display is QEMU's ramfb: the firmware's driver (QemuRamfbDxe) picks memory for a
+   picture and writes where it is, and its shape, to the fw_cfg file etc/ramfb. Windows
+   draws into the same memory until it has a display driver of its own, through the
+   framebuffer UEFI's Graphics Output Protocol hands it. */
 typedef struct HvVirtParams {
     int ncpus;
     uint64_t ram_size;
     HvDisk *disk;            /* NULL: none */
+    HvDisk *cdrom;           /* a second, read-only disk: installation media (NULL: none) */
     const uint8_t *mac;      /* NULL: no network card */
     const char *vars_path;   /* where the firmware's variables are kept (NULL: nowhere) */
 } HvVirtParams;

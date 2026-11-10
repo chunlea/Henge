@@ -31,6 +31,7 @@ typedef struct HvVmConfig {
     /* A guest that starts from UEFI firmware (Windows on Arm; host/uefi_boot.h): no ROM or aux then either. */
     const char *uefi_code;    /* the firmware: QEMU's edk2-aarch64-code.fd */
     const char *uefi_vars;    /* where the firmware keeps its variables (NULL: not kept) */
+    const char *cdrom;        /* a second disk, read-only: installation media (NULL: none) */
 } HvVmConfig;
 
 /* Returns 0, or -1 with a reason in err. */

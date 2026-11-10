@@ -924,7 +924,8 @@ const uint32_t *hv_mmu_fetch(HvCpu *cpu, uint64_t va, uint64_t *pa, uint32_t *av
    access (a fault, device memory, a write to a code page, an unusual spot in
    the page). Called by hv_helper_thunk with the guest's SIMD registers live,
    so nothing here may use them (see read_desc). flags: bit 0 write, bits 2..1
-   the TLB table (0 EL0 or unprivileged, 1 EL1, 2 EL1 with PAN), bits 8..3 bytes - 1. */
+   the TLB table (0 EL0 or unprivileged, 1 EL1, 2 EL1 with PAN), bits 8..3 bytes - 1,
+   bit 10 the fast check passes aligned addresses only (LDAR, STLR). */
 int hv_tlb_refill(HvCpu *cpu, uint64_t va, uint32_t flags) {
     int write = flags & 1, table = (flags >> 1) & 3;
     uint32_t bytes = ((flags >> 3) & 63) + 1;
@@ -934,6 +935,7 @@ int hv_tlb_refill(HvCpu *cpu, uint64_t va, uint32_t flags) {
     /* In the page, but where the fast check cannot pass (it allows HV_TLB_ADJ bytes of every access, so a small one in a
        page's last HV_TLB_ADJ bytes misses): a refill would come straight back here. */
     if (bytes <= HV_TLB_ADJ + 1 && off + HV_TLB_ADJ > PAGE_MASK) return 1;
+    if ((flags >> 10 & 1) && (va & (bytes - 1))) return 1; /* the same again: Windows' clock stores the time with an STLR at +0x14 */
     HvWalk w;
     walk_begin(cpu, va);
     hv_mmu_walk(cpu, va, write ? HV_ACC_WRITE : HV_ACC_READ, el, &w);

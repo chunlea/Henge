@@ -1089,8 +1089,10 @@ static void translate_mem(Emit *e, uint32_t insn, uint64_t pc) {
     /* Writeback forms change their base, and the retry recomputes it: those
        (and RMW, exclusive and vector forms) go straight to the helper. */
     int can_refill = !vec_kind && !rmw && op.mode != HV_ADDR_PRE && op.mode != HV_ADDR_POST && op.bytes <= 64 && !e->slow_mem;
-    /* hv_tlb_refill's flags: bit 9 set (so never 0), bit 0 write, bits 2..1 the table, 8..3 bytes - 1 */
-    uint32_t rflags = can_refill ? 1u << 9 | (uint32_t)(op.store ? 1 : 0) | (uint32_t)el_idx << 1 | (op.bytes - 1) << 3 : 0;
+    /* hv_tlb_refill's flags: bit 9 set (so never 0), bit 0 write, bits 2..1 the table, 8..3 bytes - 1,
+       bit 10 the check above also wants the address aligned */
+    uint32_t rflags = can_refill ? 1u << 9 | (uint32_t)(op.store ? 1 : 0) | (uint32_t)el_idx << 1 | (op.bytes - 1) << 3 |
+                                   (op.align && op.bytes > 1 ? 1u << 10 : 0) : 0;
     put_ool(e, (Ool){.kind = OOL_SLOW, .pc = pc, .insn = insn, .nrestore = 3, .restore = {A, T, U},
                      /* The exact recheck for a page's last 15 bytes costs 6 words in every access's slow path (on by default,
                         see machine.c); with HV_RECHECK=0 such an access takes the refill, which sends it to the helper. */

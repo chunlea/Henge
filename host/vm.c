@@ -76,6 +76,15 @@ size_t hv_vm_serial_input(const uint8_t *buf, size_t len) {
 }
 
 int hv_vm_boot_display(HvBootDisplay *d) {
+    if (board.fwcfg) { /* UEFI: wherever the firmware's display driver last said the picture is (devices/virt.c) */
+        hv_dev_lock(&m);
+        uint64_t base = board.fb_base, size = board.fb_size;
+        d->width = board.fb_width, d->height = board.fb_height, d->stride = board.fb_stride;
+        hv_dev_unlock(&m);
+        if (!size) return -1;
+        d->pixels = board.ram + (base - board.mem_base);
+        return 0;
+    }
     if (board.fb_size) { /* Linux: its simple-framebuffer, or what virtio-gpu put there with the cursor drawn on */
         d->pixels = board.ram + (board.fb_base - board.mem_base);
         if (board.gpu) {
@@ -288,6 +297,9 @@ int hv_vm_create(const HvVmConfig *c, char *err, size_t errlen) {
     }
     signal(SIGPIPE, SIG_IGN); /* a guest connection closing at the far end must not end the machine */
     int have_disk = c->disk != NULL, have_aux = !linux_guest && !uefi && c->aux;
+    if (uefi && c->cdrom) {
+        if (hv_disk_open(&aux, c->cdrom, 0, 1) != 0) return fail(err, errlen, "Cannot open the installation media.");
+    }
     if (have_disk && hv_disk_open(&disk, c->disk, 0, 0) != 0) return fail(err, errlen, "Cannot open the disk image.");
     if (have_aux && hv_disk_open(&aux, c->aux, c->aux_offset ? c->aux_offset : 16384, 0) != 0)
         return fail(err, errlen, "Cannot open the auxiliary storage.");
@@ -315,7 +327,7 @@ int hv_vm_create(const HvVmConfig *c, char *err, size_t errlen) {
     static const uint8_t mac[6] = {0x02, 0x48, 0x56, 0x4d, 0x00, 0x01};
     if (uefi) {
         HvVirtParams vp = {.ncpus = ncpus, .ram_size = (c->ram_mb ? c->ram_mb : 4096) << 20, .disk = have_disk ? &disk : NULL,
-                           .mac = mac, .vars_path = c->uefi_vars};
+                           .cdrom = c->cdrom ? &aux : NULL, .mac = mac, .vars_path = c->uefi_vars};
         if (hv_virt_create(&board, &m, cpus, &vp) != 0)
             return fail(err, errlen, "Cannot build the machine (not enough memory for the guest's RAM?).");
         HvUefiBoot ub = {.code = c->uefi_code, .dtb_out = getenv("HV_DTB_OUT")};
@@ -666,7 +678,7 @@ int hv_vm_pointer(int *x, int *y) {
 }
 
 int hv_vm_snapshot(uint8_t *bgra, int width, int height) {
-    if (board.fb_size && width > 0 && height > 0) { /* Linux: its framebuffer, scaled (nearest) */
+    if (board.fb_size && !board.fwcfg && width > 0 && height > 0) { /* Linux: its framebuffer, scaled (nearest) */
         const uint32_t *src = (const uint32_t *)(const void *)(board.ram + (board.fb_base - board.mem_base));
         uint32_t *dst = (uint32_t *)(void *)bgra;
         for (int y = 0; y < height; y++) {
