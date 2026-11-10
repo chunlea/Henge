@@ -1,0 +1,55 @@
+Makefile
+  s_be58c8822e297c::t_2857ea00dd30f9 10,29-30,153,167-169
+core/cpu.h
+  s_be58c8822e297c::t_be79c9d0f2a43e 182
+core/dispatch.c
+  s_be58c8822e297c::t_dbef57b41e3dad 957-962
+core/machine.c
+  s_be58c8822e297c::t_191fa65f9f1087 10,452-477,588-592,617-621
+core/machine.h
+  s_be58c8822e297c::t_71bde07d79d53a 32-36,246,335-340
+core/mmu.c
+  s_be58c8822e297c::t_b527e10eac1d89 37,833-840
+devices/virt.c
+  s_be58c8822e297c::t_aac8ef2fcc04e9 135-140
+devices/virt.h
+  s_be58c8822e297c::t_c49dfe3e1c30b1 51
+devices/virtio.c
+  s_be58c8822e297c::t_6505127f87cec6 38,52-54,81-84,87,96-99
+devices/virtio.h
+  s_be58c8822e297c::t_f93d191078b4c4 42,48
+devices/virtio_gpu.c
+  s_be58c8822e297c::t_d0f8be1de291bc 7,268-306,340
+devices/virtio_gpu.h
+  s_be58c8822e297c::t_110356c24f72b5 33-39,44-48
+devices/virtio_gpu_metal.m
+  s_be58c8822e297c::t_bdc70e8825c096 1-55
+devices/virtio_gpu_priv.h
+  s_be58c8822e297c::t_d43755427ad265 23-26,35-36,43-45,54-63
+devices/virtio_gpu_virgl.c
+  s_be58c8822e297c::t_b9d5df48830e9c 20,23-25,48-59,92-102,105-106,185-189,198-206,237-242,245-246,270-286,291,344-365,368-376,401-402,640-753,764,820,829-830,889-894,897,901-1009,1094-1100,1133,1135-1138,1171-1179,1212,1214,1217-1221,1224,1228,1235,1252,1269-1270,1309-1320
+devices/virtio_gpu_virgl.h
+  s_be58c8822e297c::t_0207407a15c346 10-14
+host/main.c
+  s_be58c8822e297c::t_52291fd44d3aa5 1031,1087,1117
+host/vm.c
+  s_be58c8822e297c::t_d516519b3b6856 27,81-91,368,649-652
+host/vm.h
+  s_be58c8822e297c::t_c4bbe670317e04 35
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "27fd46cb244a6fe7ffa1a51c0da7613a91daacdb",
+  "prompts": {},
+  "sessions": {
+    "s_be58c8822e297c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "460830a0-c917-44aa-9aea-92d45fd794ef",
+        "model": "unknown"
+      },
+      "human_author": "chunli <git@chunli.dev>"
+    }
+  }
+}
