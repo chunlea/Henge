@@ -40,6 +40,9 @@ Windows has no virtio drivers out of the box, so the board gives it what it does
   fw_cfg file `etc/ramfb`, and Windows goes on drawing in the same memory through the
   framebuffer UEFI's Graphics Output Protocol hands it. 800x600 until there is a display
   driver.
+- **Network**: a USB network card, a CDC NCM function on the same xHCI controller. Windows 11 has a
+  driver for that class (UsbNcm), and Linux has one (cdc_ncm). Behind it is the user-mode network the
+  other guests have: an address by DHCP (10.0.2.15), the host's DNS, connections out.
 - **Interrupts**: PCI interrupt pins, one SPI a slot. No MSI: the board has no ITS.
 
 The xHCI controller has two sets of devices. The virtual Mac's keyboard and trackpad
@@ -89,7 +92,8 @@ reg add HKLM\SYSTEM\Setup\LabConfig /v BypassSecureBootCheck /t REG_DWORD /d 1 /
 For debugging: `HV_VIRT_DISK=virtio` and `HV_VIRT_CD=virtio` put the disk and the media
 on virtio instead (the firmware and Linux can use them, Windows cannot), `HV_NO_ACPI`
 leaves the device tree as the only description, `HV_XHCI_LOG` logs the USB controller,
-and `HV_BUGCHECK=0x13a` looks for Windows' record of a stop with that code in guest
+`HV_VIRT_NET=virtio` makes the network card a virtio one, `HV_NET_LOG` logs each frame, `HV_GIC_LOG` logs an
+interrupt Windows routes to another CPU (it does, as it runs), and `HV_BUGCHECK=0x13a` looks for Windows' record of a stop with that code in guest
 memory when the machine stops.
 
 Linux starts on this board as well, which is a quick way to check a device: from the
@@ -108,10 +112,22 @@ thread's (a guest CPU that waits for the host's disk in a DPC is a
 eight submission queues of 1024 entries that all complete into one queue of 1024, and
 leaves it to the controller to hold completions back, as the specification says.
 
+## In the iOS app
+
+The Windows tab makes a machine from an ISO chosen in Files (a blank sparse disk, with the ISO in the
+CD-ROM drive until it is removed) or from a disk brought in: a raw image, or one packed with
+`build/hvsparse pack` (the holes of a 64 GB image left out), which is how an image installed on a Mac
+gets there. The firmware comes with the app, gzipped: `ios/scripts/fetch_uefi.sh` takes it from
+Homebrew's QEMU before a build.
+
+Windows has no driver for the Magic Trackpad the app's trackpad surface is to the other guests, so
+for a UEFI guest the engine keeps the pointer itself (`host/vm.c`): one finger moves it, two scroll,
+a mouse moves it, and the USB tablet reports where it is. A session with the disc in its drive
+presses a key while the firmware starts, for the disc's "Press any key to boot from CD or DVD", and
+its Details type what Setup needs: the LabConfig settings above, and `oobe\bypassnro`.
+
 ## Not there yet
 
-- The iOS app does not offer Windows. Everything above is the Mac's command-line tool.
-- No network: Windows has no driver for the virtio card.
 - No sound, no display driver (so one resolution, drawn by the CPU), no clipboard or
   shared folder.
 - A restart ends `hengevm`: it has to be started again (a shell loop does). The
