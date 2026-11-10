@@ -20,8 +20,8 @@
 /* What can sit on a port. The virtual Mac has the first two. The UEFI board (hv_xhci_create_pc) has a
    keyboard, a tablet (a pointer that reports where it is on the screen, as QEMU's usb-tablet does: no
    mouse to capture) and, with installation media, a USB CD-ROM drive (mass storage, bulk-only, SCSI):
-   devices Windows has drivers for out of the box. */
-enum { HV_USB_KEYBOARD, HV_USB_TRACKPAD, HV_USB_TABLET, HV_USB_CDROM };
+   devices Windows has drivers for out of the box. So is the network card, a CDC NCM function. */
+enum { HV_USB_KEYBOARD, HV_USB_TRACKPAD, HV_USB_TABLET, HV_USB_CDROM, HV_USB_NET };
 #define HV_TAB_REPORTS 64
 #define HV_XHCI_INTRS 4
 #define HV_XHCI_EPS 32 /* device context index 1..31 */
@@ -113,11 +113,25 @@ typedef struct HvXhci {
     uint8_t *msc_buf;      /* the data on its way to the host */
     uint64_t msc_cap;
     uint64_t msc_len, msc_off;
+    /* The network card (CDC NCM). The host side is a pair of hooks, as virtio-net's is: transmit gets
+       every frame the guest sends, and frames for the guest go in through hv_xhci_net_receive. */
+    uint8_t net_mac[6];
+    int net_alt;           /* the data interface's alternate setting: 1 once the guest brings the network up */
+    int net_notify;        /* notifications owed: 2 the link's speed and then its state, 1 its state */
+    uint16_t net_seq;
+    uint8_t *net_buf;      /* one NTB */
+    void (*net_transmit)(void *opaque, const uint8_t *frame, uint32_t len);
+    void *net_opaque;
+    uint64_t net_tx_frames, net_rx_frames, net_rx_dropped;
 } HvXhci;
 
 HvXhci *hv_xhci_create(HvMachine *m, HvPcie *bus);
-/* The UEFI board's: a keyboard, a tablet and, if cdrom is not NULL, a CD-ROM drive holding it. */
-HvXhci *hv_xhci_create_pc(HvMachine *m, HvPcie *bus, HvDisk *cdrom);
+/* The UEFI board's: a keyboard, a tablet and, if cdrom is not NULL, a CD-ROM drive holding it, and if
+   mac is not NULL, a network card with that address. */
+HvXhci *hv_xhci_create_pc(HvMachine *m, HvPcie *bus, HvDisk *cdrom, const uint8_t *mac);
+/* CPU thread: a frame for the guest. 0 if the guest has no transfer waiting for one (the caller keeps
+   the frame for later). */
+int hv_xhci_net_receive(HvXhci *x, const uint8_t *frame, uint32_t len);
 /* Any thread: where the tablet's pointer is (0..32767 across the display, each way) and which buttons
    are down (bit 0 left, 1 right, 2 middle); wheel is a number of notches turned since the last call. */
 void hv_xhci_pointer(HvXhci *x, int px, int py, int buttons, int wheel);

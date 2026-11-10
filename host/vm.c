@@ -163,6 +163,10 @@ static void board_poll(void) {
     if (net_on) hv_net_poll();
 }
 
+static int usb_net_receive(void *card, const uint8_t *frame, uint32_t len) {
+    return hv_xhci_net_receive(card, frame, len);
+}
+
 static int fail(char *err, size_t n, const char *msg) {
     if (err && n) snprintf(err, n, "%s", msg);
     return -1;
@@ -356,8 +360,9 @@ int hv_vm_create(const HvVmConfig *c, char *err, size_t errlen) {
         if (hv_vmapple_load_rom(&board, c->rom) != 0) return fail(err, errlen, "Cannot read the ROM (AVPBooter.vmapple2.bin).");
         hv_vmapple_reset_cpu(&board);
     }
-    if (board.net && !c->no_net) {
-        if (hv_net_attach(&m, board.net) != 0) fprintf(stderr, "hengevm: user-mode network unavailable\n");
+    if ((board.net || board.usb_net) && !c->no_net) {
+        if ((board.net ? hv_net_attach(&m, board.net)
+                       : hv_net_attach_card(&m, usb_net_receive, board.usb, &board.usb->net_transmit)) != 0) fprintf(stderr, "hengevm: user-mode network unavailable\n");
         else net_on = 1;
     }
     if (board.snd && !c->no_sound) hv_audio_attach(board.snd);

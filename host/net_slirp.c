@@ -48,7 +48,9 @@ typedef struct Timer {
 } Timer;
 
 static Slirp *slirp;
-static HvVirtioNet *net;
+static HvNetReceive net_receive;
+static void *net;
+static HvNetTransmit *net_transmit;
 static HvMachine *machine;
 static Queue to_guest, to_host;
 static int wake_pipe[2] = {-1, -1};
@@ -270,7 +272,7 @@ void hv_net_poll(void) {
         if (to_guest.head != to_guest.tail) f = to_guest.f[to_guest.head % QUEUE];
         pthread_mutex_unlock(&to_guest.mu);
         if (!f.data) return;
-        if (!hv_virtio_net_receive(net, f.data, f.len)) return; /* no buffer posted yet: try again later */
+        if (!net_receive(net, f.data, f.len)) return; /* no buffer posted yet: try again later */
         hv_net_rx_frames++;
         pthread_mutex_lock(&to_guest.mu);
         to_guest.head++;
@@ -279,7 +281,15 @@ void hv_net_poll(void) {
     }
 }
 
+static int virtio_receive(void *card, const uint8_t *frame, uint32_t len) {
+    return hv_virtio_net_receive(card, frame, len);
+}
+
 int hv_net_attach(HvMachine *m, HvVirtioNet *n) {
+    return hv_net_attach_card(m, virtio_receive, n, &n->transmit);
+}
+
+int hv_net_attach_card(HvMachine *m, HvNetReceive receive, void *card, HvNetTransmit *hook) {
     if (machine) return -1;
     machine = m;
     atomic_store(&stopping, 0);
@@ -319,8 +329,8 @@ int hv_net_attach(HvMachine *m, HvVirtioNet *n) {
         inet_pton(AF_INET, HV_SHARE_ADDR, &addr);
         if (slirp_add_unix(slirp, share_socket, &addr, 80) != 0) fprintf(stderr, "hengevm: net: no route to the shared folder\n");
     }
-    net = n;
-    n->transmit = transmit;
+    net = card, net_receive = receive, net_transmit = hook;
+    *hook = transmit;
     if (pthread_create(&network_thread, NULL, net_thread, NULL) != 0) { hv_net_detach(); return -1; }
     thread_started = 1;
     return 0;
@@ -335,7 +345,8 @@ void hv_net_detach(void) {
         pthread_join(network_thread, NULL);
         thread_started = 0;
     }
-    if (net) net->transmit = NULL;
+    if (net_transmit) *net_transmit = NULL;
+    net_transmit = NULL;
     if (slirp) slirp_cleanup(slirp);
     slirp = NULL;
     if (queues_initialized) {

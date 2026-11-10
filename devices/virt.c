@@ -86,8 +86,13 @@ int hv_virt_create(HvVmapple *b, HvMachine *m, HvCpu *cpus, const HvVirtParams *
     const char *cd = getenv("HV_VIRT_CD");
     int virtio_cd = cd && !strcmp(cd, "virtio");
     if (p->cdrom && virtio_cd && !(b->aux_blk = hv_virtio_blk_create(m, b->pcie, p->cdrom, HV_VBLK_PLAIN))) return -1;
-    if (!getenv("HV_NO_XHCI")) b->usb = hv_xhci_create_pc(m, b->pcie, virtio_cd ? NULL : p->cdrom);
-    if (p->mac) b->net = hv_virtio_net_create(m, b->pcie, p->mac);
+    /* The network card is a USB one too (CDC NCM). HV_VIRT_NET=virtio: a virtio card instead. */
+    const char *nk = getenv("HV_VIRT_NET");
+    int virtio_net = getenv("HV_NO_XHCI") || (nk && !strcmp(nk, "virtio"));
+    if (!getenv("HV_NO_XHCI"))
+        b->usb = hv_xhci_create_pc(m, b->pcie, virtio_cd ? NULL : p->cdrom, virtio_net ? NULL : p->mac);
+    if (p->mac && virtio_net) b->net = hv_virtio_net_create(m, b->pcie, p->mac);
+    b->usb_net = p->mac && !virtio_net && b->usb;
     if (!b->usb) { /* HV_NO_XHCI: virtio input, which the firmware and Linux can use */
         b->keyboard = hv_virtio_input_create(m, b->pcie, HV_VINPUT_KEYBOARD);
         b->mouse = hv_virtio_input_create(m, b->pcie, HV_VINPUT_MOUSE);

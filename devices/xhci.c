@@ -171,6 +171,36 @@ static const uint8_t cd_config_desc[32] = {
 
 static const char *const cd_strings[] = {NULL, "HengeVM", "HengeVM USB CD-ROM", "1"};
 
+/* The network card: a CDC NCM function (Network Control Model 1.0), which Windows 11 has a driver
+   for out of the box (UsbNcm) and Linux has too (cdc_ncm). Two interfaces under an interface
+   association, so that Windows' composite driver hands the pair to one driver by its class:
+   the control interface with its notification endpoint, and the data interface, whose alternate
+   setting 1 has the two bulk endpoints that carry Ethernet frames packed in NTBs. */
+static const uint8_t net_device_desc[18] = {
+    18, 1, 0x00, 0x02, 0xef, 0x02, 0x01, 64, /* a composite device described by interface associations */
+    0x6b, 0x1d, 0x05, 0x01,                  /* the Linux Foundation's NCM gadget: 0x1d6b, 0x0105 */
+    0x00, 0x01, 1, 2, 3, 1,
+};
+
+static const uint8_t net_config_desc[94] = {
+    9, 2, 94, 0, 2, 1, 0, 0x80, 50,
+    8, 11, 0, 2, 2, 0x0d, 0, 0,               /* interfaces 0 and 1 are one function: communications, NCM */
+    9, 4, 0, 0, 1, 2, 0x0d, 0, 0,             /* interface 0: communications, NCM */
+    5, 0x24, 0x00, 0x10, 0x01,                /* CDC 1.10 */
+    5, 0x24, 0x06, 0, 1,                      /* union: controls interface 1 */
+    13, 0x24, 0x0f, 4, 0, 0, 0, 0, 0xea, 0x05, 0, 0, 0, /* Ethernet: address in string 4, 1514-byte frames */
+    6, 0x24, 0x1a, 0x00, 0x01, 0,             /* NCM 1.0, no optional requests */
+    7, 5, 0x81, 3, 16, 0, 9,                  /* EP1 IN, interrupt: notifications */
+    9, 4, 1, 0, 0, 0x0a, 0, 1, 0,             /* interface 1: data, NTBs. Alternate 0: no endpoints */
+    9, 4, 1, 1, 2, 0x0a, 0, 1, 0,             /* alternate 1 */
+    7, 5, 0x82, 2, 0x00, 0x02, 0,             /* EP2 IN, bulk */
+    7, 5, 0x02, 2, 0x00, 0x02, 0,             /* EP2 OUT, bulk */
+};
+
+static const char *const net_strings[] = {NULL, "HengeVM", "HengeVM USB Network", "1"};
+
+#define NCM_NTB_MAX 16384u /* the largest NTB either way */
+
 struct HvXhciDev {
     const char *const *strings;
     const uint8_t *device_desc;
@@ -185,6 +215,7 @@ static const struct HvXhciDev devs[] = {
     {tp_strings, tp_device_desc, tp_config_desc, sizeof tp_config_desc, tp_report_desc, sizeof tp_report_desc},
     {tab_strings, tab_device_desc, tab_config_desc, sizeof tab_config_desc, tab_report_desc, sizeof tab_report_desc},
     {cd_strings, cd_device_desc, cd_config_desc, sizeof cd_config_desc, NULL, 0},
+    {net_strings, net_device_desc, net_config_desc, sizeof net_config_desc, NULL, 0},
 };
 
 static int xlog(void) {
@@ -400,6 +431,13 @@ static int control(HvXhci *x, int slot, const uint8_t setup[8], uint8_t *out, in
             if (idx == 0) {
                 tmp[0] = 4, tmp[1] = 3, tmp[2] = 0x09, tmp[3] = 0x04; /* English (US) */
                 src = tmp, len = 4;
+            } else if (idx == 4 && kind == HV_USB_NET) { /* the Ethernet address, as twelve hex digits */
+                tmp[0] = 26, tmp[1] = 3;
+                for (int i = 0; i < 12; i++) {
+                    tmp[2 + 2 * i] = (uint8_t)"0123456789ABCDEF"[(x->net_mac[i / 2] >> (i & 1 ? 0 : 4)) & 15];
+                    tmp[3 + 2 * i] = 0;
+                }
+                src = tmp, len = 26;
             } else if (idx < 4) {
                 const char *s = d->strings[idx];
                 int n = (int)strlen(s);
@@ -418,6 +456,34 @@ static int control(HvXhci *x, int slot, const uint8_t setup[8], uint8_t *out, in
     } else if (type == 0xa1 && req == 0xfe && kind == HV_USB_CDROM) { /* GET_MAX_LUN: one unit */
         tmp[0] = 0;
         src = tmp, len = 1;
+    } else if (type == 0xa1 && kind == HV_USB_NET) { /* NCM's requests for what the function is like */
+        memset(tmp, 0, 28);
+        if (req == 0x80) { /* GET_NTB_PARAMETERS */
+            uint32_t in_max = NCM_NTB_MAX, out_max = NCM_NTB_MAX;
+            tmp[0] = 28, tmp[2] = 1;                      /* 16-bit NTBs */
+            memcpy(tmp + 4, &in_max, 4);
+            tmp[8] = 4, tmp[10] = 0, tmp[12] = 4;         /* to the host: datagrams at multiples of 4 */
+            memcpy(tmp + 16, &out_max, 4);
+            tmp[20] = 4, tmp[22] = 0, tmp[24] = 4;        /* from it: the same */
+            src = tmp, len = 28;
+        } else if (req == 0x85) { /* GET_NTB_INPUT_SIZE */
+            uint32_t in_max = NCM_NTB_MAX;
+            memcpy(tmp, &in_max, 4);
+            src = tmp, len = 4;
+        } else if (req == 0x87) { /* GET_MAX_DATAGRAM_SIZE */
+            tmp[0] = 0xea, tmp[1] = 0x05;
+            src = tmp, len = 2;
+        } else if (req == 0x83 || req == 0x89) { /* GET_NTB_FORMAT, GET_CRC_MODE: 16-bit, no CRC */
+            src = tmp, len = 2;
+        } else return -1;
+    } else if (type == 0x01 && req == 11 && kind == HV_USB_NET) { /* SET_INTERFACE */
+        /* The data interface's alternate 1 is the network coming up: the function says how fast the
+           link is and that it is connected, on its notification endpoint. */
+        if (setup[4] == 1) {
+            x->net_alt = value & 0xff;
+            x->net_notify = x->net_alt ? 2 : 0;
+        }
+        return 0;
     } else if (type == 0x80 && req == 0) { /* GET_STATUS */
         tmp[0] = 0, tmp[1] = 0;
         src = tmp, len = 2;
@@ -752,6 +818,93 @@ static void pc_hid_in(HvXhci *x, int slot) {
 
 /* ---- the CD-ROM drive ---- */
 
+/* ---- the network card ---- */
+
+static uint16_t le16(const uint8_t *p) { return (uint16_t)(p[0] | p[1] << 8); }
+
+/* An NTB from the guest: a header, then tables (NDPs) that say where its Ethernet frames are. */
+static void net_ntb(HvXhci *x, const uint8_t *b, uint32_t len) {
+    if (len < 12 || memcmp(b, "NCMH", 4)) return;
+    uint32_t ndp = le16(b + 10);
+    for (int tables = 0; ndp && tables < 8; tables++) {
+        if (ndp + 8 > len || memcmp(b + ndp, "NCM", 3)) return;
+        uint32_t crc = b[ndp + 3] == '1' ? 4 : 0; /* NCM1: each frame has its CRC after it */
+        uint32_t end = ndp + le16(b + ndp + 4);
+        if (end > len) end = len;
+        for (uint32_t e = ndp + 8; e + 4 <= end; e += 4) {
+            uint32_t at = le16(b + e), n = le16(b + e + 2);
+            if (!at || !n) break;
+            if (at + n > len || n < 14 + crc) continue;
+            x->net_tx_frames++;
+            if (x->net_transmit) x->net_transmit(x->net_opaque, b + at, n - crc);
+        }
+        ndp = le16(b + ndp + 6);
+    }
+}
+
+static int net_slot(HvXhci *x) {
+    for (int slot = 1; slot <= HV_XHCI_SLOTS; slot++)
+        if (x->slots[slot].dev >= 0 && x->kind[x->slots[slot].dev] == HV_USB_NET) return slot;
+    return 0;
+}
+
+enum { NET_DCI_NOTIFY = 3, NET_DCI_OUT = 4, NET_DCI_IN = 5 };
+
+static void pc_net(HvXhci *x, int slot) {
+    struct HvXhciSlot *s = &x->slots[slot];
+    Td *td = &pc_td;
+    while (x->net_notify && s->ep_running[NET_DCI_NOTIFY] && td_peek(x, &s->ep[NET_DCI_NOTIFY], td)) {
+        /* ConnectionSpeedChange (1 Gbit/s each way), then NetworkConnection: connected. */
+        uint8_t n[16] = {0xa1, x->net_notify == 2 ? 0x2a : 0x00, x->net_notify == 2 ? 0 : 1, 0, 0, 0, x->net_notify == 2 ? 8 : 0, 0};
+        uint32_t speed = 1000000000u;
+        memcpy(n + 8, &speed, 4), memcpy(n + 12, &speed, 4);
+        uint64_t len = x->net_notify == 2 ? 16 : 8;
+        if (len > td->total) len = td->total;
+        td_copy(x, td, n, len, 1);
+        td_complete(x, slot, NET_DCI_NOTIFY, &s->ep[NET_DCI_NOTIFY], td, len);
+        x->net_notify--;
+    }
+    while (s->ep_running[NET_DCI_OUT] && td_peek(x, &s->ep[NET_DCI_OUT], td)) {
+        uint64_t n = td->total < NCM_NTB_MAX ? td->total : NCM_NTB_MAX;
+        td_copy(x, td, x->net_buf, n, 0);
+        td_complete(x, slot, NET_DCI_OUT, &s->ep[NET_DCI_OUT], td, td->total);
+        net_ntb(x, x->net_buf, (uint32_t)n);
+    }
+}
+
+/* A frame for the guest, as an NTB of its own on the bulk IN endpoint. 0: the guest has no transfer
+   waiting for one (or has not brought the network up): the caller keeps the frame for later. */
+int hv_xhci_net_receive(HvXhci *x, const uint8_t *frame, uint32_t len) {
+    int slot = x && (x->usbcmd & 1) ? net_slot(x) : 0;
+    if (!slot || !x->net_alt) return 0;
+    struct HvXhciSlot *s = &x->slots[slot];
+    Td *td = &pc_td;
+    if (!s->ep_running[NET_DCI_IN] || !td_peek(x, &s->ep[NET_DCI_IN], td)) return 0;
+    enum { HDR = 12, NDP = 16 };
+    uint32_t total = HDR + NDP + len;
+    if (len > 1514 || total > td->total) { /* no room for it in what the guest posted: the frame is dropped */
+        x->net_rx_dropped++;
+        return 1;
+    }
+    uint8_t *b = x->net_buf;
+    memset(b, 0, HDR + NDP);
+    memcpy(b, "NCMH", 4);
+    b[4] = HDR;
+    b[6] = (uint8_t)x->net_seq, b[7] = (uint8_t)(x->net_seq >> 8);
+    x->net_seq++;
+    b[8] = (uint8_t)total, b[9] = (uint8_t)(total >> 8);
+    b[10] = HDR;
+    memcpy(b + HDR, "NCM0", 4);
+    b[HDR + 4] = NDP;
+    b[HDR + 8] = HDR + NDP;
+    b[HDR + 10] = (uint8_t)len, b[HDR + 11] = (uint8_t)(len >> 8);
+    memcpy(b + HDR + NDP, frame, len);
+    td_copy(x, td, b, total, 1);
+    td_complete(x, slot, NET_DCI_IN, &s->ep[NET_DCI_IN], td, total);
+    x->net_rx_frames++;
+    return 1;
+}
+
 enum { MSC_COMMAND, MSC_DATA_IN, MSC_DATA_OUT, MSC_STATUS };
 #define CD_BLOCK 2048u
 
@@ -951,6 +1104,7 @@ static void pc_run(HvXhci *x, int slot, int dci) {
     if (s->dev < 0) return;
     if (dci == 1) pc_ep0(x, slot);
     else if (x->kind[s->dev] == HV_USB_CDROM) pc_cd(x, slot);
+    else if (x->kind[s->dev] == HV_USB_NET) pc_net(x, slot);
     else pc_hid_in(x, slot);
 }
 
@@ -1120,7 +1274,7 @@ static void run_commands(HvXhci *x) {
 static uint32_t port_speed(HvXhci *x, int p) {
     /* The port speed ids a controller without its own table has: 1 full, 2 low, 3 high. The virtual Mac's
        trackpad has always said 2, and macOS works it. */
-    return x->kind[p] == HV_USB_CDROM ? 3 : x->kind[p] == HV_USB_TRACKPAD ? SPEED_HIGH : SPEED_FULL;
+    return x->kind[p] == HV_USB_CDROM || x->kind[p] == HV_USB_NET ? 3 : x->kind[p] == HV_USB_TRACKPAD ? SPEED_HIGH : SPEED_FULL;
 }
 
 static void port_connect(HvXhci *x) {
@@ -1183,6 +1337,7 @@ static void reset(HvXhci *x) {
     x->tp_f1_len = 0;
     x->tab_rhead = x->tab_rtail = 0;
     x->msc_state = 0;
+    x->net_alt = x->net_notify = 0;
     x->msc_len = x->msc_off = 0;
     x->sense_key = x->sense_asc = 0;
     for (int p = 0; p < x->nports; p++)
@@ -1573,15 +1728,20 @@ void hv_xhci_poll(HvXhci *x) {
     }
 }
 
-static HvXhci *create(HvMachine *m, HvPcie *bus, int pc, HvDisk *cdrom) {
+static HvXhci *create(HvMachine *m, HvPcie *bus, int pc, HvDisk *cdrom, const uint8_t *mac) {
     HvXhci *x = calloc(1, sizeof *x);
     x->m = m;
     x->pc = pc;
     x->cd = cdrom;
     x->kind[0] = HV_USB_KEYBOARD;
     x->kind[1] = pc ? HV_USB_TABLET : HV_USB_TRACKPAD;
-    x->kind[2] = HV_USB_CDROM;
-    x->nports = pc && cdrom ? 3 : 2;
+    x->nports = 2;
+    if (pc && cdrom) x->kind[x->nports++] = HV_USB_CDROM;
+    if (pc && mac) {
+        x->kind[x->nports++] = HV_USB_NET;
+        memcpy(x->net_mac, mac, 6);
+        x->net_buf = malloc(NCM_NTB_MAX);
+    }
     pthread_mutex_init(&x->mu, NULL);
     /* QEMU's xHCI IDs. Class 0x0c0330 with revision 0: macOS's IOPCIClassMatch compares all 32 bits. */
     hv_pci_init(&x->pci, 0x1b36, 0x000d, 0x0c033000, 0x1af4, 0x1100);
@@ -1599,5 +1759,5 @@ static HvXhci *create(HvMachine *m, HvPcie *bus, int pc, HvDisk *cdrom) {
     return x;
 }
 
-HvXhci *hv_xhci_create(HvMachine *m, HvPcie *bus) { return create(m, bus, 0, NULL); }
-HvXhci *hv_xhci_create_pc(HvMachine *m, HvPcie *bus, HvDisk *cdrom) { return create(m, bus, 1, cdrom); }
+HvXhci *hv_xhci_create(HvMachine *m, HvPcie *bus) { return create(m, bus, 0, NULL, NULL); }
+HvXhci *hv_xhci_create_pc(HvMachine *m, HvPcie *bus, HvDisk *cdrom, const uint8_t *mac) { return create(m, bus, 1, cdrom, mac); }

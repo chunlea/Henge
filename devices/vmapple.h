@@ -66,6 +66,7 @@ typedef struct HvVmapple {
     struct HvPvgLite *pvg;   /* our own graphics device (the Mac replaces it with the framework) */
     HvVirtioBlk *aux_blk, *root_blk;
     HvVirtioNet *net;
+    int usb_net;      /* the UEFI board: the network card is the xHCI controller's (usb) */
     HvVirtioSnd *snd;
     HvVirtioBalloon *balloon; /* HV_BALLOON=MB (the first target; 0 = none yet) adds it; off by default until tried on a phone */
     HvVirtioInput *keyboard, *mouse;
