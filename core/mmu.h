@@ -55,6 +55,11 @@ static inline uint32_t hv_ijc_key(uint64_t va, uint64_t salt) {
 void hv_ijc_drop_asid(HvCpu *cpu, uint16_t asid);
 /* TTBR0 changed: use the new address space's user entries. */
 void hv_ijc_switch(HvCpu *cpu);
+/* What tells one user address space from another: TTBR0 with its ASID, or, with ASIDs in TTBR1 (TCR_EL1.A1), TTBR0's
+   table with TTBR1's ASID; 0 when there is none (cpu->user_parked). The TLB's put-aside entries are kept under it. */
+uint64_t hv_user_key(const HvCpu *cpu);
+/* TTBR0 was just written, with ASIDs in TTBR1: whether its top-level table is empty (sets cpu->user_parked). */
+void hv_user_park_check(HvCpu *cpu);
 void hv_tlb_flush_va_asid(HvCpu *cpu, uint64_t va, int asid); /* asid -1: every address space */
 void hv_tlb_flush_va_page(HvCpu *cpu, uint64_t va, int asid);
 /* log2 of the page size the guest's translation regime uses for va (TCR_EL1.TG0 or TG1). */

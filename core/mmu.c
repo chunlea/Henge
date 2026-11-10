@@ -174,9 +174,26 @@ static void ijc_clear(HvCpu *cpu, int kernel) {
         memset(cpu->pc_state->ijc + (size_t)t * (HV_IJC_TABLE_BYTES / 8), 0, HV_IJC_TABLE_BYTES);
 }
 
-/* ASIDs live in TTBR0 unless TCR.A1 puts them in TTBR1; then every process looks alike to us. */
+/* ASIDs live in TTBR0 unless TCR.A1 puts them in TTBR1 (Linux). */
 static int current_asid(HvCpu *cpu) {
-    return (cpu->tcr_el1 >> 22) & 1 ? -1 : (int)(cpu->ttbr0_el1 >> 48);
+    return (int)(((cpu->tcr_el1 >> 22) & 1 ? cpu->ttbr1_el1 : cpu->ttbr0_el1) >> 48);
+}
+
+uint64_t hv_user_key(const HvCpu *cpu) {
+    if (!((cpu->tcr_el1 >> 22) & 1)) return cpu->ttbr0_el1;
+    if (cpu->user_parked) return 0;
+    return (cpu->ttbr0_el1 & 0x0000ffffffffffffull) | (cpu->ttbr1_el1 & 0xffff000000000000ull);
+}
+
+void hv_user_park_check(HvCpu *cpu) {
+    cpu->user_parked = 0;
+    if (!((cpu->tcr_el1 >> 22) & 1) || !cpu->m) return;
+    uint64_t bytes = 1ull << hv_mmu_granule_bits(cpu, 0);
+    const uint64_t *t = hv_phys_ptr(cpu->m, cpu->ttbr0_el1 & OA_MASK & ~1ull & ~(bytes - 1), bytes);
+    if (!t) return;
+    for (uint64_t i = 0; i < bytes / 8; i++)
+        if (t[i]) return;
+    cpu->user_parked = 1;
 }
 
 /* ---- the (user id, page) set ---- */
@@ -707,6 +724,7 @@ static void tlb_fill(HvCpu *cpu, uint64_t va, int el, const HvWalk *w) {
     uint32_t slot = (uint32_t)(va >> HV_TLB_PAGE_BITS) & (HV_TLB_SIZE - 1);
     HvTlbEntry *e = hv_tlb_ent(cpu, slot, table);
     if (!((page_va >> 55) & 1)) {
+        if (cpu->user_parked) return; /* the table was empty when TTBR0 was set: not an address space we keep entries for */
         if (w->block_size > (1ull << HV_TLB_PAGE_BITS) && cpu->pc_state) note_block(cpu->pc_state, page_va, w->block_size);
         if (cpu->nuser_fills < HV_USER_FILLS) cpu->user_fills[cpu->nuser_fills] = (uint16_t)hv_tlb_code(slot, table);
         if (cpu->nuser_fills <= HV_USER_FILLS) cpu->nuser_fills++;
@@ -1287,7 +1305,7 @@ void hv_tlb_switch_user(HvCpu *cpu, uint64_t old, uint64_t now) {
     uint32_t n = cpu->nuser_fills;
     cpu->nuser_fills = 0;
     HvTlbStash *s = NULL;
-    if (old && n <= HV_STASH_CAP) {
+    if (old && n && n <= HV_STASH_CAP) {
         for (int i = 0; i < HV_STASHES && !s; i++)
             if (p->stash[i].ttbr0 == old) s = &p->stash[i];
         for (int i = 0; i < HV_STASHES && !s; i++)
