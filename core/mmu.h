@@ -58,6 +58,10 @@ void hv_ijc_switch(HvCpu *cpu);
 /* What tells one user address space from another: TTBR0 with its ASID, or, with ASIDs in TTBR1 (TCR_EL1.A1), TTBR0's
    table with TTBR1's ASID; 0 when there is none (cpu->user_parked). The TLB's put-aside entries are kept under it. */
 uint64_t hv_user_key(const HvCpu *cpu);
+/* TTBR1 went from one top-level table to another. 1: the kernel entries that the two tables translate alike
+   (every address under a top-level entry they share) were kept, and the rest dropped. 0: nothing was done,
+   and the caller empties the TLB (tables this cannot compare, or an entry seen to differ for the first time). */
+int hv_tlb_switch_kernel(HvCpu *cpu, uint64_t old, uint64_t now);
 /* TTBR0 was just written, with ASIDs in TTBR1: whether its top-level table is empty (sets cpu->user_parked). */
 void hv_user_park_check(HvCpu *cpu);
 void hv_tlb_flush_va_asid(HvCpu *cpu, uint64_t va, int asid); /* asid -1: every address space */

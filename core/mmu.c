@@ -161,8 +161,49 @@ void hv_tlb_flush(HvCpu *cpu) {
     }
     cpu->nuser_fills = 0;
     cpu->nkernel_fills = 0;
+    cpu->nkpriv_fills = 0;
+    cpu->kpriv_exec = 0;
     hv_tlb_stash_drop(cpu, -1);
     kblock_clear(cpu->pc_state);
+}
+
+/* A write of TTBR1 that names another top-level table. An address under a top-level entry that is the same
+   in both tables is translated by the same lower tables as before, whatever the ASID: its TLB entries and
+   cached branch targets stay right. Windows gives every process a top-level table of its own, user half
+   and kernel half in one page, and the kernel halves differ in a handful of entries (the table's map of
+   itself, the process's own working area, its session): with the whole TLB emptied at each of its tens of
+   thousands of switches a second, the kernel ran on TLB misses. */
+int hv_tlb_switch_kernel(HvCpu *cpu, uint64_t old, uint64_t now) {
+    static int off = -1; /* HV_NO_KSWITCH: a whole flush every time, as before */
+    if (off < 0) off = getenv("HV_NO_KSWITCH") != NULL;
+    HvMachine *m = cpu->m;
+    if (off || !m || hv_mmu_granule_bits(cpu, ~0ull) != 12) return 0;
+    unsigned bits = 64 - (unsigned)((cpu->tcr_el1 >> 16) & 0x3f);
+    if (bits <= 39 || bits > 48) return 0; /* not a walk that starts at level 0 */
+    unsigned n = 1u << (bits - 39);
+    const uint64_t *a = hv_phys_ptr(m, old & OA_MASK & ~1ull, n * 8ull), *b = hv_phys_ptr(m, now & OA_MASK & ~1ull, n * 8ull);
+    if (!a || !b) return 0;
+    /* A table being built or taken apart (a process starting or ending) differs all over: that is a whole
+       flush, and teaches nothing about which entries are a process's own. */
+    unsigned differ = 0;
+    for (unsigned i = 0; i < n; i++) differ += a[i] != b[i];
+    if (differ > 8) return 0;
+    int fresh = 0;
+    for (unsigned i = 0; i < n; i++) {
+        if (a[i] == b[i]) continue;
+        unsigned j = 512 - n + i; /* (va >> 39) & 511 of the addresses under it */
+        if (!(cpu->kpriv[j >> 6] >> (j & 63) & 1)) cpu->kpriv[j >> 6] |= 1ull << (j & 63), fresh = 1;
+    }
+    /* An entry that differs for the first time: what was filled under it is in no list. */
+    if (fresh || cpu->nkpriv_fills > HV_KPRIV_FILLS) return 0;
+    for (uint32_t k = 0; k < cpu->nkpriv_fills; k++) memset(&cpu->tlb[cpu->kpriv_fills[k]], 0x80, sizeof cpu->tlb[0]);
+    cpu->nkpriv_fills = 0;
+    if (cpu->kpriv_exec) {
+        cpu->kpriv_exec = 0;
+        hv_ijc_reset(cpu, 1);
+    }
+    if (m->stats_interval) m->stats.kswitches++;
+    return 1;
 }
 
 /* Clear the tables of one half (user tables are the even flags values, kernel ones odd). */
@@ -828,6 +869,11 @@ static void tlb_fill(HvCpu *cpu, uint64_t va, int el, const HvWalk *w) {
             note_kblock(cpu->pc_state, page_va, w->block_size);
         if (cpu->nkernel_fills < HV_KERNEL_FILLS) cpu->kernel_fills[cpu->nkernel_fills] = (uint16_t)hv_tlb_code(slot, table);
         if (cpu->nkernel_fills <= HV_KERNEL_FILLS) cpu->nkernel_fills++;
+        unsigned top = (unsigned)(page_va >> 39) & 511;
+        if (cpu->kpriv[top >> 6] >> (top & 63) & 1) { /* under a top-level entry that changes with the process */
+            if (cpu->nkpriv_fills < HV_KPRIV_FILLS) cpu->kpriv_fills[cpu->nkpriv_fills] = (uint16_t)hv_tlb_code(slot, table);
+            if (cpu->nkpriv_fills <= HV_KPRIV_FILLS) cpu->nkpriv_fills++;
+        }
     }
     e->addend = (int64_t)((uint64_t)(uintptr_t)(ram->host + (page_pa - ram->pa)) - page_va);
     if (ram->page_host) { /* a paged region: the page's own place */
@@ -1184,6 +1230,12 @@ void hv_ijc_drop_code_page(HvCpu *cpu, uint64_t v) {
 
 int hv_ijc_fill_checked(HvCpu *cpu, HvBlock *b) {
     HvPerCpu *p = cpu->pc_state;
+    /* A cached target in kernel memory that changes with the process (hv_tlb_switch_kernel): the kernel half of
+       the cache goes at the next such switch. */
+    if ((b->va >> 55) & 1) {
+        unsigned top = (unsigned)(b->va >> 39) & 511;
+        if (cpu->kpriv[top >> 6] >> (top & 63) & 1) cpu->kpriv_exec = 1;
+    }
     if (!p) {
         hv_ijc_fill(cpu, b);
         return 1;
