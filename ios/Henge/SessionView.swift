@@ -10,6 +10,7 @@ struct SessionView: View {
 
     @StateObject private var display = DisplayRouter()
     @ObservedObject private var sticky = StickyKeys.shared
+    @ObservedObject private var shortcuts = LinuxShortcuts.shared
     @State private var error: String?
     @State private var state: Int32 = 0
     @State private var bootAttempt = 0
@@ -381,20 +382,19 @@ struct SessionView: View {
         .accessibilityLabel(label)
     }
 
-    /// A Linux desktop's Super chords, for a touch screen and for a keyboard whose ⌘-Space iPadOS keeps: a tap
-    /// is Super-Space (the launcher), and holding it offers the rest. Super held stays down until the next key
-    /// or click, as the keyboard row's ⌘ does.
+    /// A Linux desktop's key chords, for a touch screen and for a keyboard whose ⌘-Space iPadOS keeps: the user's
+    /// own list (LinuxShortcuts). A tap sends the first, and holding the button offers them all. Super held stays
+    /// down until the next key or click, as the keyboard row's ⌘ does.
     private func superTool(tint: Color) -> some View {
         Menu {
-            Button("Launcher (Super-Space)") { Keys.chord(Keys.command, " ") }
-            Button("Menu (Super-Alt-Space)") {
-                henge_vm_key(Keys.option, 1)
-                Keys.chord(Keys.command, " ")
-                henge_vm_key(Keys.option, 0)
+            ForEach(shortcuts.all) { s in
+                Button(s.name.trimmingCharacters(in: .whitespaces).isEmpty ? s.chord : "\(s.name) (\(s.chord))") { s.send() }
             }
+            Divider()
             Button(sticky.down.contains(Keys.command) ? "Let Go of Super" : "Hold Super for the Next Key") {
                 sticky.toggle(Keys.command)
             }
+            Button("Edit Shortcuts…") { showDetails = true }
         } label: {
             Image(systemName: "square.grid.2x2")
                 .font(.system(size: 19, weight: .medium))
@@ -402,9 +402,9 @@ struct SessionView: View {
                 .frame(width: 44, height: 44)
                 .contentShape(Rectangle())
         } primaryAction: {
-            Keys.chord(Keys.command, " ")
+            if let first = shortcuts.all.first { first.send() } else { showDetails = true }
         }
-        .accessibilityLabel("Launcher")
+        .accessibilityLabel(shortcuts.all.first?.title ?? "Shortcuts")
     }
 
     // MARK: Filling the phone
@@ -574,6 +574,8 @@ struct SessionView: View {
                     Text("Less drawing for the emulated CPUs: window and Dock animations, desktop widgets, the screen saver and a moving wallpaper go. Open Terminal on the Mac, tap the button and press Return, then log out and back in. Also turn on Reduce Motion and Reduce Transparency in the Mac's System Settings, Accessibility. Undo puts it back, apart from the wallpaper. Needs the Mac's keyboard layout to be U.S.")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
+                } else {
+                    LinuxShortcutsSection()
                 }
                 Section("Log") {
                     VStack(alignment: .leading, spacing: 1) {

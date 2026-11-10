@@ -129,6 +129,8 @@ struct SettingsView: View {
                         .font(.footnote).foregroundStyle(.secondary)
                 }
                 .listRowBackground(Desk.card)
+                LinuxShortcutsSection()
+                    .listRowBackground(Desk.card)
                 Section("Performance") {
                     Picker("Mac refresh rate", selection: $refreshRate) {
                         Text("30 Hz").tag(30)
