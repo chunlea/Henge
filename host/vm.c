@@ -670,6 +670,8 @@ int hv_vm_pointer(int *x, int *y) {
 int hv_vm_snapshot(uint8_t *bgra, int width, int height) {
     if (board.fb_size && width > 0 && height > 0) { /* Linux: its framebuffer, scaled (nearest) */
         const uint32_t *src = (const uint32_t *)(const void *)(board.ram + (board.fb_base - VMAPPLE_MEM));
+        HvBootDisplay d; /* virtio-gpu's picture, wherever it is kept, with the pointer on it */
+        if (board.gpu && hv_vm_boot_display(&d) == 0) src = (const uint32_t *)(const void *)d.pixels;
         uint32_t *dst = (uint32_t *)(void *)bgra;
         for (int y = 0; y < height; y++) {
             const uint32_t *row = src + (uint64_t)((uint64_t)y * board.fb_height / (uint64_t)height) * board.fb_width;

@@ -77,6 +77,7 @@ struct BootDisplay: View {
                         Unmanaged<AnyObject>.fromOpaque(raw).release()
                         linuxSurface = true
                         image = nil
+                        HengeLog.log("display", "Linux draws with the GPU: showing its surface")
                     }
                     if !gpuLive && !linuxSurface {
                         changes = henge_vm_display_changes()

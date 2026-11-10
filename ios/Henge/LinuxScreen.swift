@@ -83,6 +83,7 @@ final class LinuxScreenView: UIView {
             if size != screen {
                 screen = size
                 place()
+                HengeLog.log("display", "Linux surface \(Int(size.width))x\(Int(size.height)) in a layer \(Int(bounds.width))x\(Int(bounds.height))")
             }
             // Two surfaces take turns, so this is a different object each frame and the layer redraws.
             picture.contents = surface

@@ -110,6 +110,8 @@ static struct {
     void (*Disable)(unsigned);
     void (*Flush)(void);
     unsigned (*GetError)(void);
+    void (*ReadPixels)(int, int, int, int, unsigned, unsigned, void *);
+    void (*Finish)(void);
 } gl;
 #define EGL_IOSURFACE_ANGLE 0x3454
 #define EGL_IOSURFACE_PLANE_ANGLE 0x345A
@@ -181,7 +183,7 @@ struct HvGpuVirgl {
     size_t readback_px;
     /* Presenting without a readback (HV_VIRGL_PRESENT): each flush is a GPU copy of the scanout into one of two
        IOSurfaces, by turns, and the host shows the one finished last (hv_gpu_virgl_surface). */
-    int present;                          /* asked for, and ANGLE can bind IOSurfaces */
+    int present;                          /* 0 no; 1 a GPU blit into the surface; 2 read into the surface's memory */
     pthread_mutex_t present_mu;           /* the surfaces, between the worker and whoever shows or reads them */
     IOSurfaceRef surf[2];
     void *pbuf[2];
@@ -240,14 +242,15 @@ static int bring_up(HvGpuVirgl *v) {
     E(GetDisplay) E(Initialize) E(BindAPI) E(ChooseConfig) E(CreateContext) E(DestroyContext) E(MakeCurrent)
 #undef E
     /* Presenting: optional, so a missing piece only means the readback stays. */
-    v->present = getenv("HV_VIRGL_PRESENT") && atoi(getenv("HV_VIRGL_PRESENT"));
+    v->present = getenv("HV_VIRGL_PRESENT") ? atoi(getenv("HV_VIRGL_PRESENT")) : 0;
+    if (v->present < 0 || v->present > 2) v->present = 0;
 #define EO(n) if (!(*(void **)&egl.n = dlsym(e, "egl" #n))) v->present = 0;
     EO(CreatePbufferFromClientBuffer) EO(DestroySurface) EO(BindTexImage) EO(ReleaseTexImage) EO(GetConfigAttrib)
 #undef EO
 #define G(n) if (!(*(void **)&gl.n = dlsym(gles, "gl" #n))) v->present = 0;
     G(GenFramebuffers) G(DeleteFramebuffers) G(BindFramebuffer) G(FramebufferTexture2D) G(CheckFramebufferStatus)
     G(BlitFramebuffer) G(GenTextures) G(DeleteTextures) G(BindTexture) G(GetIntegerv) G(IsEnabled) G(Enable) G(Disable)
-    G(Flush) G(GetError)
+    G(Flush) G(GetError) G(ReadPixels) G(Finish)
 #undef G
 #define V(n) if (!(*(void **)&vr.n = dlsym(r, "virgl_renderer_" #n))) { fprintf(stderr, "hengevm: virgl: no virgl_renderer_" #n "\n"); return -1; }
     V(init) V(get_cap_set) V(fill_caps) V(context_create) V(context_destroy) V(ctx_attach_resource) V(ctx_detach_resource)
@@ -374,7 +377,7 @@ static CFNumberRef num(int32_t x) { return CFNumberCreate(NULL, kCFNumberSInt32T
 static int present_make(HvGpuVirgl *v, uint32_t w, uint32_t h) {
     present_drop(v);
     EGLint target = EGL_TEXTURE_2D;
-    egl.GetConfigAttrib(v->dpy, v->cfg, EGL_BIND_TO_TEXTURE_TARGET_ANGLE, &target);
+    if (v->present == 1) egl.GetConfigAttrib(v->dpy, v->cfg, EGL_BIND_TO_TEXTURE_TARGET_ANGLE, &target);
     if (target != EGL_TEXTURE_2D) return -1; /* a rectangle texture (ANGLE on desktop OpenGL): not handled */
     pthread_mutex_lock(&v->present_mu);
     int ok = 1;
@@ -388,7 +391,9 @@ static int present_make(HvGpuVirgl *v, uint32_t w, uint32_t h) {
         const EGLint a[] = {EGL_WIDTH, (EGLint)w, EGL_HEIGHT, (EGLint)h, EGL_IOSURFACE_PLANE_ANGLE, 0, EGL_TEXTURE_TARGET, EGL_TEXTURE_2D,
                             EGL_TEXTURE_INTERNAL_FORMAT_ANGLE, GL_BGRA_EXT, EGL_TEXTURE_FORMAT, EGL_TEXTURE_RGBA,
                             EGL_TEXTURE_TYPE_ANGLE, GL_UNSIGNED_BYTE, EGL_NONE};
-        if (v->surf[i]) v->pbuf[i] = egl.CreatePbufferFromClientBuffer(v->dpy, EGL_IOSURFACE_ANGLE, (void *)v->surf[i], v->cfg, a);
+        if (!v->surf[i]) { ok = 0; break; }
+        if (v->present == 2) continue; /* written through its memory: no texture */
+        v->pbuf[i] = egl.CreatePbufferFromClientBuffer(v->dpy, EGL_IOSURFACE_ANGLE, (void *)v->surf[i], v->cfg, a);
         if (!v->pbuf[i]) { ok = 0; break; }
         gl.GenTextures(1, &v->surf_tex[i]);
         gl.BindTexture(GL_TEXTURE_2D, v->surf_tex[i]);
@@ -420,19 +425,85 @@ static int present_flush(HvGpuVirgl *v, Res *r) {
         if (scissor) gl.Disable(GL_SCISSOR_TEST); /* it clips a blit too */
         gl.BindFramebuffer(GL_READ_FRAMEBUFFER, v->read_fbo);
         gl.FramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, info.tex_id, 0);
+        if (v->present == 2) {
+            /* Read into the surface's own memory: one copy, and the layer shows it. (On an iPad the GPU blit below
+               stopped reaching the surface after a while: ANGLE's texture and the IOSurface's memory came apart.) */
+            int flip2 = (info.flags & RESOURCE_FLAG_Y_0_TOP) != 0;
+            IOSurfaceRef sf = v->surf[b];
+            IOSurfaceLock(sf, 0, NULL);
+            uint8_t *base = IOSurfaceGetBaseAddress(sf);
+            size_t stride = IOSurfaceGetBytesPerRow(sf);
+            unsigned err2;
+            if (stride == (size_t)r->w * 4 && !flip2) {
+                gl.ReadPixels(0, 0, (int)r->w, (int)r->h, GL_BGRA_EXT, GL_UNSIGNED_BYTE, base);
+                err2 = gl.GetError();
+            } else {
+                size_t px = (size_t)r->w * r->h;
+                if (px > v->readback_px) {
+                    free(v->readback);
+                    v->readback = malloc(px * 4);
+                    v->readback_px = v->readback ? px : 0;
+                }
+                err2 = 1;
+                if (v->readback) {
+                    gl.ReadPixels(0, 0, (int)r->w, (int)r->h, GL_BGRA_EXT, GL_UNSIGNED_BYTE, v->readback);
+                    err2 = gl.GetError();
+                    for (uint32_t y = 0; y < r->h && !err2; y++)
+                        memcpy(base + (size_t)y * stride, v->readback + (size_t)(flip2 ? r->h - 1 - y : y) * r->w, (size_t)r->w * 4);
+                }
+            }
+            IOSurfaceUnlock(sf, 0, NULL);
+            gl.FramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, 0, 0);
+            if (!err2) {
+                pthread_mutex_lock(&v->present_mu);
+                v->front = b, v->back = !b;
+                pthread_mutex_unlock(&v->present_mu);
+                rc = 0;
+            }
+            goto restore;
+        }
         gl.BindFramebuffer(GL_DRAW_FRAMEBUFFER, v->surf_fbo[b]);
         /* The IOSurface's first row is the picture's top, and so is the first row of the texture a guest's GPU
            driver scans out (seen: Hyprland on virgl); a Y_0_TOP resource (a 2D one) is kept the other way up. */
         int flip = (info.flags & RESOURCE_FLAG_Y_0_TOP) != 0;
         gl.BlitFramebuffer(0, flip ? (int)r->h : 0, (int)r->w, flip ? 0 : (int)r->h, 0, 0, (int)r->w, (int)r->h, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+        unsigned err = gl.GetError();
+        static unsigned looked;
+        if (getenv("HV_GPU_LOG") && (looked < 4 || (looked & 255) == 0)) { /* is the picture in the source, and in the surface? */
+            static uint32_t px[64 * 64];
+            uint64_t src = 0, dst = 0;
+            unsigned st = gl.CheckFramebufferStatus(GL_READ_FRAMEBUFFER);
+            memset(px, 0, sizeof px);
+            gl.ReadPixels(0, flip ? (int)r->h - 64 : 0, 64, 64, 0x1908, GL_UNSIGNED_BYTE, px);
+            unsigned e1 = gl.GetError();
+            for (int i = 0; i < 64 * 64; i++) src += px[i] & 0xffffff;
+            gl.BindFramebuffer(GL_READ_FRAMEBUFFER, v->surf_fbo[b]);
+            memset(px, 0, sizeof px);
+            gl.ReadPixels(0, 0, 64, 64, 0x1908, GL_UNSIGNED_BYTE, px);
+            unsigned e2 = gl.GetError();
+            for (int i = 0; i < 64 * 64; i++) dst += px[i] & 0xffffff;
+            gl.BindFramebuffer(GL_READ_FRAMEBUFFER, v->read_fbo);
+            gl.Finish();
+            uint64_t mem = 0;
+            IOSurfaceLock(v->surf[b], kIOSurfaceLockReadOnly, NULL);
+            const uint8_t *base = IOSurfaceGetBaseAddress(v->surf[b]);
+            size_t stride = IOSurfaceGetBytesPerRow(v->surf[b]);
+            for (int y = 0; y < 64; y++) for (int x = 0; x < 64; x++) { uint32_t p4; memcpy(&p4, base + y * stride + x * 4, 4); mem += p4 & 0xffffff; }
+            IOSurfaceUnlock(v->surf[b], kIOSurfaceLockReadOnly, NULL);
+            fprintf(stderr, "hengevm: virgl: present %u: %ux%u res %u tex %u fmt %u flags %#x: blit error %#x, source fbo %#x sum %llx (%#x), surface sum %llx (%#x), in its memory %llx (stride %zu, %zux%zu, in use %d)\n",
+                    looked, r->w, r->h, r->id, info.tex_id, info.virgl_format, info.flags, err, st, (unsigned long long)src, e1, (unsigned long long)dst, e2,
+                    (unsigned long long)mem, stride, IOSurfaceGetWidth(v->surf[b]), IOSurfaceGetHeight(v->surf[b]), (int)IOSurfaceIsInUse(v->surf[b]));
+        }
+        looked++;
         gl.FramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, 0, 0);
-        if (!gl.GetError()) {
+        if (!err) {
             gl.Flush();
             pthread_mutex_lock(&v->present_mu);
             v->front = b, v->back = !b;
             pthread_mutex_unlock(&v->present_mu);
             rc = 0;
         }
+    restore:
         if (scissor) gl.Enable(GL_SCISSOR_TEST);
     }
     gl.BindFramebuffer(GL_READ_FRAMEBUFFER, (unsigned)read0);
