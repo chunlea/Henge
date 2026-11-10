@@ -6,14 +6,15 @@ apps have no hypervisor access. The engine is built and tested on the Mac
 (`build/hengevm`) and linked into the iPhone app (`make ios-lib`).
 
 The guest's terminal power requests and iOS session cleanup are described in
-[Guest shutdown](guest-shutdown.md).
+[Guest shutdown](guest-shutdown.md). The same engine runs Windows on Arm on a second
+board, started by UEFI firmware: see [Windows on Arm](windows-guest.md).
 
 ## Layout
 
 - `core/`: guest CPU state, the block translator, the software MMU, and exceptions.
 - `devices/`: the virtual Mac's devices (interrupt controller, timers, UART, RTC,
   config region, AES, PCIe with virtio block, network, input, sound and USB, and
-  the virtual GPU).
+  the virtual GPU), and the UEFI board's (`virt.c`: fw_cfg, a flash chip, NVMe).
 - `host/`: what runs around the engine (memory, JIT region, disk files, the
   install and USB shims, and the Mac's command-line tool).
 - `ios/`: the iPhone app. See [ios/README.md](../ios/README.md).
