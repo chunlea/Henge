@@ -652,6 +652,10 @@ static void wheel(uint16_t axis, int amount) {
     }
 }
 
+void hv_vm_pointer_abs(int x, int y, int buttons, int wheel_notches) {
+    if (!atomic_load(&input_stopping)) hv_xhci_pointer(board.usb, x, y, buttons, wheel_notches);
+}
+
 void hv_vm_mouse_wheel(int dy) { wheel(HV_REL_WHEEL, dy); }
 void hv_vm_mouse_hwheel(int dx) { wheel(HV_REL_HWHEEL, dx); }
 

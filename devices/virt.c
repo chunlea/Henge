@@ -79,14 +79,16 @@ int hv_virt_create(HvVmapple *b, HvMachine *m, HvCpu *cpus, const HvVirtParams *
     if (p->cdrom && virtio_cd && !(b->aux_blk = hv_virtio_blk_create(m, b->pcie, p->cdrom, HV_VBLK_PLAIN))) return -1;
     if (!getenv("HV_NO_XHCI")) b->usb = hv_xhci_create_pc(m, b->pcie, virtio_cd ? NULL : p->cdrom);
     if (p->mac) b->net = hv_virtio_net_create(m, b->pcie, p->mac);
-    b->keyboard = hv_virtio_input_create(m, b->pcie, HV_VINPUT_KEYBOARD);
-    b->mouse = hv_virtio_input_create(m, b->pcie, HV_VINPUT_MOUSE);
+    if (!b->usb) { /* HV_NO_XHCI: virtio input, which the firmware and Linux can use */
+        b->keyboard = hv_virtio_input_create(m, b->pcie, HV_VINPUT_KEYBOARD);
+        b->mouse = hv_virtio_input_create(m, b->pcie, HV_VINPUT_MOUSE);
+    }
 
     standard_ids(b->root_blk ? &b->root_blk->vio : NULL);
     standard_ids(b->aux_blk ? &b->aux_blk->vio : NULL);
     standard_ids(b->net ? &b->net->vio : NULL);
-    standard_ids(&b->keyboard->vio);
-    standard_ids(&b->mouse->vio);
+    standard_ids(b->keyboard ? &b->keyboard->vio : NULL);
+    standard_ids(b->mouse ? &b->mouse->vio : NULL);
 
     m->tick = hv_vmapple_tick;
     m->tick_opaque = b;

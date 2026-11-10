@@ -230,7 +230,17 @@ static void prof_dump(const char *path) {
 
 /* Walks the pointer to a spot on the screen, watching where the display says
    it is, in small steps as a hand makes: macOS accelerates big ones past the target. */
+static int tablet_x, tablet_y; /* a UEFI guest's pointer, in the tablet's units */
+
 static void pointer_to(int x, int y) {
+    if (board.fwcfg) { /* a tablet: it is wherever it is said to be */
+        HvBootDisplay d;
+        if (hv_vm_boot_display(&d) != 0 || d.width < 2 || d.height < 2) return;
+        tablet_x = x * 32767 / ((int)d.width - 1), tablet_y = y * 32767 / ((int)d.height - 1);
+        hv_vm_pointer_abs(tablet_x, tablet_y, 0, 0);
+        usleep(80000);
+        return;
+    }
     const uint8_t *page = hv_pvg_lite_display_page(board.pvg);
     for (int i = 0; page && i < 1500; i++) {
         uint32_t at = *(const volatile uint32_t *)(page + 0xe00);
@@ -245,6 +255,12 @@ static void pointer_to(int x, int y) {
 }
 
 static void click_here(void) {
+    if (board.fwcfg) {
+        hv_vm_pointer_abs(tablet_x, tablet_y, 1, 0);
+        usleep(120000);
+        hv_vm_pointer_abs(tablet_x, tablet_y, 0, 0);
+        return;
+    }
     hv_virtio_input_send(board.mouse, HV_EV_KEY, HV_BTN_LEFT, 1);
     hv_virtio_input_send(board.mouse, HV_EV_SYN, 0, 0);
     usleep(120000);
@@ -849,6 +865,21 @@ static void *cpu_thread(void *unused) {
             uint32_t fsc = hv_mmu_access(&cpu, translate_va, HV_ACC_READ, cpu.el, &pa);
             fprintf(stderr, "  translate %llx -> pa %llx (fsc %x)\n", (unsigned long long)translate_va,
                     (unsigned long long)pa, fsc);
+        }
+    }
+    if (getenv("HV_BUGCHECK")) {
+        /* Debugging a Windows guest: HV_BUGCHECK=CODE (as on the blue screen's list, 0x13a say) looks through guest
+           memory for the kernel's record of the stop, the code and its four parameters as five 64-bit words. */
+        uint64_t code = strtoull(getenv("HV_BUGCHECK"), NULL, 0);
+        const uint64_t *q = (const uint64_t *)(const void *)board.ram;
+        int shown = 0;
+        for (uint64_t i = 0; i + 5 <= board.ram_size / 8 && shown < 12; i++) {
+            if (q[i] != code || (!q[i + 1] && !q[i + 2] && !q[i + 3] && !q[i + 4])) continue;
+            if (q[i + 2] >> 44 != 0xfffff && q[i + 3] >> 44 != 0xfffff && q[i + 1] >> 44 != 0xfffff) continue; /* a kernel address among them */
+            fprintf(stderr, "hengevm: stop %llx at pa %llx: %llx %llx %llx %llx\n", (unsigned long long)code,
+                    (unsigned long long)(board.mem_base + i * 8), (unsigned long long)q[i + 1], (unsigned long long)q[i + 2],
+                    (unsigned long long)q[i + 3], (unsigned long long)q[i + 4]);
+            shown++;
         }
     }
     fprintf(stderr, "\nhengevm: stopped (%s) after %llu blocks, %d translated\n", interrupted ? "interrupted" : reason_name(r),

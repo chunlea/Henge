@@ -99,6 +99,9 @@ void hv_vm_mouse_hwheel(int dx);
 void hv_vm_touch(int id, int phase, int x, int y, uint32_t ts_ms);
 void hv_vm_touch_frame(uint32_t ts_ms); /* commit one frame with every finger that moved */
 void hv_vm_touch_button(int down); /* the pad's full press (a click) */
+/* A UEFI guest's pointer is a tablet: where it is, 0..32767 across the display each way, which buttons are
+   down (bit 0 left, 1 right, 2 middle), and wheel notches turned since the last call. */
+void hv_vm_pointer_abs(int x, int y, int buttons, int wheel);
 /* Where the guest has its pointer, in display pixels. 0, or -1 before it has one. */
 int hv_vm_pointer(int *x, int *y);
 /* A small picture of the display, BGRA, width * height * 4 bytes. 0, or -1 before anything shows. */
