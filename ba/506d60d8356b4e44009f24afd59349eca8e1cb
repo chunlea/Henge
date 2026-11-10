@@ -1,0 +1,33 @@
+ios/Henge/Hardware.swift
+  s_5f13ddd5a833ec::t_b986245c2ec9a9 74-104,108-110,112-126,131,155-158,160,167-178,181,190,193-216
+ios/Henge/Input.swift
+  s_5f13ddd5a833ec::t_106f74e4d27b61 67-69
+ios/Henge/SessionView.swift
+  s_c77b5918bb7381::t_56df27fe5519d7 12,196,294-297,384-409,418
+ios/Henge/SettingsView.swift
+  s_c77b5918bb7381::t_dbabd1ea173505 13-14,36-51,121-131
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "ba506d60d8356b4e44009f24afd59349eca8e1cb",
+  "prompts": {},
+  "sessions": {
+    "s_5f13ddd5a833ec": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5f607dec-e0c6-419e-ae6a-60c8e0859601",
+        "model": "claude-fable-5-2"
+      },
+      "human_author": "chunli <git@chunli.dev>"
+    },
+    "s_c77b5918bb7381": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "28dddce1-95ce-4d14-ab1f-49986484a8f3",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "chunli <git@chunli.dev>"
+    }
+  }
+}
