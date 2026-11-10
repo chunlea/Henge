@@ -1,0 +1,31 @@
+devices/gicv3.h
+  s_5f13ddd5a833ec::t_1c1159d27b64e5 44-48
+devices/gicv3.c
+  s_be58c8822e297c::t_326ea1aea7f6eb 4,7,125-140
+devices/nvme.c
+  s_be58c8822e297c::t_394ae0622e28e7 76-81,83-84,95,99,168,178,285-288,301,360,362
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "7844e443695555d038ed0cfe8e9e0d33023e8770",
+  "prompts": {},
+  "sessions": {
+    "s_5f13ddd5a833ec": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5f607dec-e0c6-419e-ae6a-60c8e0859601",
+        "model": "claude-fable-5-2"
+      },
+      "human_author": "chunli <git@chunli.dev>"
+    },
+    "s_be58c8822e297c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "460830a0-c917-44aa-9aea-92d45fd794ef",
+        "model": "unknown"
+      },
+      "human_author": "chunli <git@chunli.dev>"
+    }
+  }
+}
