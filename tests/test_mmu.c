@@ -543,6 +543,46 @@ int main(void) {
         hv_knob[HV_K_WALKLOG] = 1;
     }
 
+    /* ASIDs in TTBR1 (TCR_EL1.A1), as Linux keeps them. Its process switch is: TTBR0 to an empty table, TTBR1 with
+       the next ASID, TTBR0 to the next process's table. The kernel's entries must stay through all of it (they
+       used to go, with every cache, on each TTBR1 write), and a process's own entries come back when it does. */
+    {
+        if (!cpu.pc_state) cpu.pc_state = &m.percpu[0];
+        uint64_t empty = alloc_table(), pa_a = alloc_table(), pb = alloc_table(), kern = alloc_table();
+        host(pa_a)[3] = host(pb)[3] = alloc_table() | 3; /* processes' tables have something in them */
+        cpu.el = 1;
+        cpu.tcr_el1 = 25 | 0u << 14 | 1u << 23 | 5ull << 32 | 1ull << 22 | 25ull << 16 | 2ull << 30; /* 4K, A1, T1SZ 25 */
+        cpu.sctlr_el1 |= 1;
+        cpu.ttbr1_el1 = kern | 7ull << 48;
+        cpu.ttbr0_el1 = pa_a;
+        cpu.user_parked = 0;
+        hv_tlb_flush(&cpu);
+        const uint64_t uva = 0x40400000ull + (5ull << HV_TLB_PAGE_BITS), kva = 0xffffff8000000000ull + (9ull << HV_TLB_PAGE_BITS);
+        HvTlbEntry *ue = hv_tlb_ent(&cpu, (uva >> HV_TLB_PAGE_BITS) & (HV_TLB_SIZE - 1), 0);
+        HvTlbEntry *ke = hv_tlb_ent(&cpu, (kva >> HV_TLB_PAGE_BITS) & (HV_TLB_SIZE - 1), 1);
+        ue->read_tag = uva - HV_TLB_ADJ, ue->addend = 0;
+        ke->read_tag = kva - HV_TLB_ADJ, ke->addend = 0;
+        cpu.user_fills[0] = (uint16_t)hv_tlb_code((uva >> HV_TLB_PAGE_BITS) & (HV_TLB_SIZE - 1), 0), cpu.nuser_fills = 1;
+        cpu.kernel_fills[0] = (uint16_t)hv_tlb_code((kva >> HV_TLB_PAGE_BITS) & (HV_TLB_SIZE - 1), 1), cpu.nkernel_fills = 1;
+        const uint32_t msr_ttbr0 = 0xd5182000u | 1, msr_ttbr1 = 0xd5182020u | 1; /* msr ttbr0_el1, x1 / msr ttbr1_el1, x1 */
+        cpu.x[1] = empty, hv_sysreg_msr(&cpu, msr_ttbr0, 0);
+        checks++;
+        if (!cpu.user_parked || ue->read_tag != HV_TLB_INVALID) printf("  FAIL A1: an empty TTBR0 is not parked, or the old process's entry stayed\n"), failures++;
+        cpu.x[1] = kern | 8ull << 48, hv_sysreg_msr(&cpu, msr_ttbr1, 0);
+        cpu.x[1] = pb, hv_sysreg_msr(&cpu, msr_ttbr0, 0);
+        checks++;
+        if (ke->read_tag == HV_TLB_INVALID) printf("  FAIL A1: a process switch dropped a kernel entry\n"), failures++;
+        checks++;
+        if (ue->read_tag != HV_TLB_INVALID || cpu.user_parked) printf("  FAIL A1: the next process sees the last one's entry\n"), failures++;
+        cpu.x[1] = empty, hv_sysreg_msr(&cpu, msr_ttbr0, 0);
+        cpu.x[1] = kern | 7ull << 48, hv_sysreg_msr(&cpu, msr_ttbr1, 0);
+        cpu.x[1] = pa_a, hv_sysreg_msr(&cpu, msr_ttbr0, 0);
+        checks++;
+        if (ue->read_tag != uva - HV_TLB_ADJ) printf("  FAIL A1: the first process's entry did not come back with it\n"), failures++;
+        checks++;
+        if (ke->read_tag == HV_TLB_INVALID) printf("  FAIL A1: switching back dropped a kernel entry\n"), failures++;
+    }
+
     printf("%d checks, %d failures\n", checks, failures);
     return failures != 0;
 }

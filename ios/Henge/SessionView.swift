@@ -9,6 +9,8 @@ struct SessionView: View {
     let close: () -> Void
 
     @StateObject private var display = DisplayRouter()
+    @ObservedObject private var sticky = StickyKeys.shared
+    @ObservedObject private var shortcuts = LinuxShortcuts.shared
     @State private var error: String?
     @State private var state: Int32 = 0
     @State private var bootAttempt = 0
@@ -192,6 +194,7 @@ struct SessionView: View {
         }
         .onAppear {
             UIApplication.shared.isIdleTimerDisabled = true
+            HardwareKeys.start(linux: mac.isLinux)
             HardwareMouse.shared.start()
             VolumeClicks.shared.start()
         }
@@ -289,6 +292,10 @@ struct SessionView: View {
                 Spacer()
                 tool("keyboard", "Keyboard") { typing = true }
                 Spacer()
+                if mac.isLinux {
+                    superTool(tint: Desk.text)
+                    Spacer()
+                }
                 pasteTool
                 Spacer()
                 tool("plus.magnifyingglass", "Zoom in") { zoomed = true }
@@ -375,6 +382,31 @@ struct SessionView: View {
         .accessibilityLabel(label)
     }
 
+    /// A Linux desktop's key chords, for a touch screen and for a keyboard whose ⌘-Space iPadOS keeps: the user's
+    /// own list (LinuxShortcuts). A tap sends the first, and holding the button offers them all. Super held stays
+    /// down until the next key or click, as the keyboard row's ⌘ does.
+    private func superTool(tint: Color) -> some View {
+        Menu {
+            ForEach(shortcuts.all) { s in
+                Button(s.name.trimmingCharacters(in: .whitespaces).isEmpty ? s.chord : "\(s.name) (\(s.chord))") { s.send() }
+            }
+            Divider()
+            Button(sticky.down.contains(Keys.command) ? "Let Go of Super" : "Hold Super for the Next Key") {
+                sticky.toggle(Keys.command)
+            }
+            Button("Edit Shortcuts…") { showDetails = true }
+        } label: {
+            Image(systemName: "square.grid.2x2")
+                .font(.system(size: 19, weight: .medium))
+                .foregroundStyle(sticky.down.contains(Keys.command) ? Desk.accentLight : tint)
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
+        } primaryAction: {
+            if let first = shortcuts.all.first { first.send() } else { showDetails = true }
+        }
+        .accessibilityLabel(shortcuts.all.first?.title ?? "Shortcuts")
+    }
+
     // MARK: Filling the phone
 
     @ViewBuilder private func floatingControls(_ layout: Layout) -> some View {
@@ -383,6 +415,7 @@ struct SessionView: View {
         let pill = HStack(spacing: 4) {
             tool("eye.slash", "Hide controls", tint: .white) { hideControls() }
             tool("keyboard", "Keyboard", tint: .white) { typing.toggle() }
+            if mac.isLinux { superTool(tint: .white) }
             pasteTool
             tool(zoomed ? "minus.magnifyingglass" : "plus.magnifyingglass", zoomed ? "Zoom out" : "Zoom in", tint: zoomed ? Desk.accentLight : .white) { zoomed.toggle() }
             tool("info.circle", "Details", tint: .white) { showDetails = true }
@@ -561,6 +594,8 @@ struct SessionView: View {
                     Text("Less drawing for the emulated CPUs: window and Dock animations, desktop widgets, the screen saver and a moving wallpaper go. Open Terminal on the Mac, tap the button and press Return, then log out and back in. Also turn on Reduce Motion and Reduce Transparency in the Mac's System Settings, Accessibility. Undo puts it back, apart from the wallpaper. Needs the Mac's keyboard layout to be U.S.")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
+                } else {
+                    LinuxShortcutsSection()
                 }
                 Section("Log") {
                     VStack(alignment: .leading, spacing: 1) {

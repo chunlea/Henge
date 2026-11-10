@@ -64,8 +64,9 @@ struct KeyboardCatcher: UIViewRepresentable {
         /// Fingers belong to the session (they drive the Mac's trackpad), not to iPadOS's undo/copy/paste bar.
         override var editingInteractionConfiguration: UIEditingInteractionConfiguration { .none }
 
-        /// ⌘-Space is iPadOS's Spotlight, but Linux desktops (Omarchy's launcher) want it as Super-Space. Ask
-        /// to go first: where iPadOS allows that, the space reaches the guest with ⌘ (Super) still down.
+        /// ⌘-Space belongs to iPadOS (Spotlight, or Siri when held): it is taken before the app's presses, and
+        /// asking for priority here only outranks UIKit's own handling of a key, not the system's shortcuts.
+        /// This stays for a setup that does hand the chord over; HardwareKeys has what works without it.
         private static let superSpace: UIKeyCommand = {
             let command = UIKeyCommand(input: " ", modifierFlags: .command, action: #selector(KeyListener.sendSuperSpace))
             command.wantsPriorityOverSystemBehavior = true

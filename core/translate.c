@@ -1972,7 +1972,12 @@ static int translate_emit(HvMachine *m, HvBlock *b, const uint32_t *code, uint32
         e->cur_i = i;
         e->u_prev = e->u_live, e->u_live = 0;
         uint32_t n0 = e->n;
+        int cold0 = e->in_cold;
         ended = translate_one(e, code[i], pc);
+        /* An instruction copied as it is (one word, the guest's own) names no stolen register, so it cannot have
+           touched host x15: a group's addend there is still there for the access after it. */
+        if (hv_knob[HV_K_UCARRY] && !ended && !cold0 && !e->in_cold && e->n == n0 + 1 && n0 < MAX_WORDS && e->w[n0] == code[i])
+            e->u_live = e->u_prev;
         if (m->stats_interval) {
             HvInsnKind k = hv_classify(code[i]);
             m->stats.kind_insns[k & 15]++;

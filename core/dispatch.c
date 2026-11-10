@@ -98,8 +98,8 @@ static uint32_t block_flags(HvCpu *cpu) {
    (m->flush_pending is set: the dispatcher does that, then tries again). */
 #define hash_of hv_block_hash
 #define find hv_block_find
-/* HV_BLOCK_DUMP=file: every 64th (HV_BLOCK_DUMP_EVERY) translated block (guest and host words) for
-   bench/hvdis.py, to see what the translator makes of real code. */
+/* HV_BLOCK_DUMP=file: every 64th (HV_BLOCK_DUMP_EVERY) translated block (guest and host words), to see what the
+   translator makes of real code: per block three 64-bit words (va, guest instructions, host words), then both. */
 static void block_dump(const HvBlock *b, const uint32_t *code) {
     static FILE *f;
     static int on = -1;
@@ -111,7 +111,10 @@ static void block_dump(const HvBlock *b, const uint32_t *code) {
         if (getenv("HV_BLOCK_DUMP_EVERY")) every = (uint32_t)atoi(getenv("HV_BLOCK_DUMP_EVERY"));
         if (!every) every = 1;
     }
-    if (!on || __atomic_add_fetch(&count, 1, __ATOMIC_RELAXED) % every) return;
+    static uint64_t lo, hi = ~0ull; /* HV_BLOCK_DUMP_VA=lo-hi (hex): only blocks at those guest addresses */
+    static int ranged = -1;
+    if (ranged < 0) ranged = getenv("HV_BLOCK_DUMP_VA") && sscanf(getenv("HV_BLOCK_DUMP_VA"), "%llx-%llx", (unsigned long long *)&lo, (unsigned long long *)&hi) == 2;
+    if (!on || b->va < lo || b->va >= hi || __atomic_add_fetch(&count, 1, __ATOMIC_RELAXED) % every) return;
     uint64_t head[3] = {b->va, b->ninsns, 0};
     const uint32_t *w = b->code;
     uint32_t n = hv_translate_last_words();
@@ -679,6 +682,9 @@ static void print_stats(HvCpu *cpu, int force) {
                     RATE(sync_probe[0]), RATE(sync_probe[1]), RATE(sync_probe[2]), RATE(sync_probe[3]));
             fprintf(stderr, "  at 1 ms the CPU waited for was/s: running %.1f, translating %.1f, in a helper %.1f, waiting for acks %.1f, at the flush barrier %.1f, off a core %.1f\n",
                     RATE(sync_phase[0]), RATE(sync_phase[1]), RATE(sync_phase[2]), RATE(sync_phase[3]), RATE(sync_phase[4]), RATE(sync_phase[5]));
+            fprintf(stderr, "    they last entered a block at (| el):");
+            for (int k = 0; k < 8; k++) fprintf(stderr, " %llx", (unsigned long long)m->stats.sync_pc[k]);
+            fprintf(stderr, "\n");
             (void)l;
         }
         fprintf(stderr, "  light lookups failed/s: odd %.0f, filters full %.0f, no mapping %.0f, no block yet %.0f; walked %.0fK/s\n",

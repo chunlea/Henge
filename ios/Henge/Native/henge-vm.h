@@ -113,6 +113,13 @@ int henge_vm_boot_display(const uint8_t **pixels, int *width, int *height, int *
 /// Linux: moves whenever the picture henge_vm_boot_display gives may have changed; 0 when there is no such count.
 uint64_t henge_vm_display_changes(void);
 void henge_vm_free_display(const uint8_t *pixels);
+/// Linux drawing with the GPU: the IOSurface (an IOSurfaceRef, retained: release it) holding its newest frame, to set
+/// as a layer's contents. NULL when there is none, and henge_vm_boot_display is the picture.
+void *henge_vm_linux_surface(void);
+/// Linux's pointer, drawn by the app over that surface: position and hot spot in the screen's pixels. gen moves when
+/// its image does; pixels (64 x 64 BGRA, premultiplied or not as the guest gave it), if not NULL, gets that image.
+/// Returns 1 when the pointer is to be shown.
+int henge_vm_linux_cursor(int32_t *x, int32_t *y, int32_t *hot_x, int32_t *hot_y, uint64_t *gen, uint32_t *pixels);
 
 /* The largest single mapping the address space takes right now, in MB (the
    increased virtual addressing entitlement raises it). */

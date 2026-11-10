@@ -176,6 +176,9 @@ typedef struct HvCpu {
     _Atomic int halted;      /* HvHaltReason; published across CPU and UI threads */
     int off;                 /* PSCI: powered off (a secondary not started yet, or CPU_OFF) until CPU_ON */
     int parked_off;          /* off, and its thread is waiting (so CPU_ON may reset it) */
+    /* With ASIDs in TTBR1 (TCR_EL1.A1, as Linux has them): TTBR0 points at a top-level table with nothing in it,
+       which is where Linux leaves it between one process and the next. No user address space then (hv_user_key 0). */
+    int user_parked;
 } HvCpu;
 
 #define HV_CPU_X(n)        ((n) * 8)

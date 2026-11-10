@@ -66,6 +66,19 @@ int hv_vm_boot_display(HvBootDisplay *d);
    so a viewer can skip unchanged frames. 0: no such count (look every time). */
 uint64_t hv_vm_display_changes(void);
 
+/* Linux drawing with the GPU and HV_VIRGL_PRESENT set: the IOSurface holding its newest frame, retained (the caller
+   releases it), to put in a layer; NULL when the picture is only hv_vm_boot_display's. */
+struct __IOSurface *hv_vm_linux_surface(void);
+/* Linux's pointer, which is not in that surface: where it is, its hot spot, and its 64 x 64 BGRA image (alpha in
+   the top byte), which changes when gen does. 0, or -1 when there is no such display. */
+typedef struct HvLinuxCursor {
+    int on;
+    int32_t x, y, hot_x, hot_y;
+    uint64_t gen;
+    const uint32_t *pixels;
+} HvLinuxCursor;
+int hv_vm_linux_cursor(HvLinuxCursor *c);
+
 /* Extra device work on CPU 0 each tick (Mac graphics). Set before hv_vm_start. */
 void hv_vm_set_poll(void (*poll)(void));
 

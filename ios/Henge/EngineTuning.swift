@@ -28,7 +28,9 @@ enum EngineTuning {
 
     static func apply() {
         var env = defaults
-        if let gpu = gpuFrameworks { env["HV_VIRGL"] = gpu }
+        // HV_VIRGL_PRESENT: frames go to the screen as IOSurfaces (LinuxScreen). 2: read from the GPU into the surface, one
+        // copy; 1: a GPU blit, no copy, which on an iPad stopped reaching the surface after a while; 0: as before.
+        if let gpu = gpuFrameworks { env["HV_VIRGL"] = gpu; env["HV_VIRGL_PRESENT"] = "2" }
         let d = UserDefaults.standard
         if [30, 120].contains(d.integer(forKey: refreshKey)) { env["HV_HZ"] = String(d.integer(forKey: refreshKey)) }
         if d.bool(forKey: superblocksKey) { env["HV_SUPERBLOCKS"] = "1" } else { unsetenv("HV_SUPERBLOCKS") }
