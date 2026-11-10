@@ -24,6 +24,7 @@
 #include "linux_boot.h"
 #include "uefi_boot.h"
 #include "../devices/virtio_gpu_virgl.h"
+#include "../devices/virtio_gpu_priv.h"
 
 static HvMachine m;
 static HvCpu cpus[HV_MAX_CPUS]; /* the board takes them as an array */
@@ -77,6 +78,17 @@ size_t hv_vm_serial_input(const uint8_t *buf, size_t len) {
 }
 
 int hv_vm_boot_display(HvBootDisplay *d) {
+    if (board.fwcfg && board.gpu && board.gpu->enabled) { /* the guest's GPU driver has the display */
+        static uint32_t *composed;
+        if (!composed) composed = malloc((size_t)GPU_MAX_W * GPU_MAX_H * 4);
+        if (!composed) return -1;
+        hv_dev_lock(&m);
+        d->width = board.gpu->width, d->height = board.gpu->height, d->stride = d->width * 4;
+        hv_virtio_gpu_compose(board.gpu, composed);
+        hv_dev_unlock(&m);
+        d->pixels = (const uint8_t *)composed;
+        return 0;
+    }
     if (board.fwcfg) { /* UEFI: wherever the firmware's display driver last said the picture is (devices/virt.c) */
         hv_dev_lock(&m);
         uint64_t base = board.fb_base, size = board.fb_size;
@@ -353,7 +365,7 @@ int hv_vm_create(const HvVmConfig *c, char *err, size_t errlen) {
     if (uefi) {
         HvVirtParams vp = {.ncpus = ncpus, .ram_size = (c->ram_mb ? c->ram_mb : 4096) << 20, .disk = have_disk ? &disk : NULL,
                            .cdrom = c->cdrom ? &aux : NULL, .mac = mac, .vars_path = c->uefi_vars,
-                           .screen_width = c->fb_width, .screen_height = c->fb_height};
+                           .screen_width = c->fb_width, .screen_height = c->fb_height, .gpu_dir = c->uefi_gpu};
         if (hv_virt_create(&board, &m, cpus, &vp) != 0)
             return fail(err, errlen, "Cannot build the machine (not enough memory for the guest's RAM?).");
         HvUefiBoot ub = {.code = c->uefi_code, .dtb_out = getenv("HV_DTB_OUT")};
@@ -634,6 +646,10 @@ void hv_vm_key_hid(uint8_t usage, int down) {
 }
 
 static void tab_size(double *w, double *h) {
+    if (board.gpu && board.gpu->enabled) {
+        *w = board.gpu->width, *h = board.gpu->height;
+        return;
+    }
     *w = board.fb_width > 1 ? board.fb_width : 800, *h = board.fb_height > 1 ? board.fb_height : 600;
 }
 

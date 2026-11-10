@@ -30,10 +30,22 @@ typedef struct HvVirtioGpu {
     uint64_t cursor_gen;       /* bumped when the cursor's image (or whether there is one) changes */
     int32_t cursor_x, cursor_y, hot_x, hot_y;
     HvGpuVirgl *virgl;         /* 3D (virglrenderer), or NULL: 2D only */
+    /* A device whose guest has a Direct3D driver for it (hv_virtio_gpu_create_d3d). */
+    int d3d;
+    int enabled;               /* a resource is on the scanout: the picture is this device's (not the firmware's framebuffer) */
+    uint32_t want_w, want_h;   /* the size the display would like to be (EDID, display info) */
+    uint64_t hostmem_size;     /* the host-visible shared memory region: BAR 2, this big */
+    uint64_t hostmem_pa;       /* where the guest has it, once something was mapped (0: not yet) */
+    HvRam *hostmem_ram;        /* and the machine's region there: its pages are the mapped blobs' */
 } HvVirtioGpu;
 
 /* display: where the picture goes, width * height 32-bit pixels. */
 HvVirtioGpu *hv_virtio_gpu_create(HvMachine *m, HvPcie *bus, uint32_t width, uint32_t height, uint32_t *display);
+/* A device for a guest with UTM's Direct3D driver (Windows, viogpu3d): virglrenderer with its Neptune protocol,
+   blob resources and memory the host maps into the guest. The guest chooses the picture's size (up to
+   GPU_MAX_W x GPU_MAX_H; width x height is what it is offered first), so the device has its own display buffer.
+   dir: the folder of frameworks (virglrenderer, ANGLE, dxmt-native). NULL if 3D cannot start. */
+HvVirtioGpu *hv_virtio_gpu_create_d3d(HvMachine *m, HvPcie *bus, uint32_t width, uint32_t height, const char *dir);
 /* The display with the cursor drawn on it, into out (width * height). */
 void hv_virtio_gpu_compose(HvVirtioGpu *g, uint32_t *out);
 /* CPU 0, device lock held: 3D requests that have finished go back to the guest. */

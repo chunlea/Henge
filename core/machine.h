@@ -29,6 +29,11 @@ typedef struct HvRam {
        phone's busy time at a login, and the other CPUs waited for the lock). */
     uint32_t *xhead;
     size_t npages;
+    /* A paged region (hv_machine_add_paged_ram): where each of its 4 KB pages is in this process, or NULL for a
+       page with nothing behind it. host is NULL. For memory a device puts together a page at a time: a GPU's
+       shared region, where a guest whose pages are 4 KB places the host's buffers at any multiple of that,
+       and the host's own pages are 16 KB, so no one stretch of host addresses could hold them. */
+    uint8_t **page_host;
 } HvRam;
 
 typedef struct HvMmio {
@@ -238,6 +243,7 @@ typedef struct HvMachine {
     int locks_initialized;
     HvRam ram[HV_MAX_RAM];
     int nram;
+    uint32_t tlb_epoch;  /* bumped to have every CPU empty its TLB before it runs on (hv_ram_set_pages) */
     HvRam *main_ram;     /* the largest region: guest RAM */
     HvMmio mmio[HV_MAX_MMIO];
     int nmmio;
@@ -326,6 +332,12 @@ int hv_machine_init(HvMachine *m, size_t jit_bytes);
 int hv_machine_init_jit(HvMachine *m, void *rx, void *rw, size_t jit_bytes);
 void hv_machine_free(HvMachine *m);
 int hv_machine_add_ram(HvMachine *m, uint64_t pa, uint64_t size, void *host, int readonly);
+/* A region with nothing in it yet, its pages set one by one (the TLB's pages must be 4 KB). NULL if it cannot be. */
+HvRam *hv_machine_add_paged_ram(HvMachine *m, uint64_t pa, uint64_t size);
+/* Any thread: npages 4 KB pages of a paged region from page `first` are at host and on (host NULL: nowhere).
+   Taking pages away waits until no CPU has a TLB entry for them (every CPU empties its TLB), so that
+   what was behind them can be unmapped when this returns. */
+void hv_ram_set_pages(HvMachine *m, HvRam *r, uint64_t first, uint64_t npages, uint8_t *host);
 int hv_machine_add_mmio(HvMachine *m, uint64_t pa, uint64_t size, void *opaque,
                         uint64_t (*read)(void *, uint64_t, unsigned),
                         void (*write)(void *, uint64_t, uint64_t, unsigned), const char *name);

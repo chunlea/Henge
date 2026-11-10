@@ -35,6 +35,7 @@ static void reset(HvVirtio *v) {
     v->driver_features = 0;
     v->dfsel = v->gfsel = 0;
     v->status = 0;
+    v->msix_config = 0xffff;
     v->isr = 0;
     v->qsel = 0;
     for (int i = 0; i < v->nq; i++) v->q[i] = (HvVirtq){.size = HV_VIRTQ_MAX_SIZE};
@@ -48,7 +49,9 @@ static uint64_t common_read(HvVirtio *v, uint64_t off) {
     case 0x04: return v->dfsel < 2 ? (uint32_t)(v->features >> (32 * v->dfsel)) : 0;
     case 0x08: return v->gfsel;
     case 0x0c: return v->gfsel < 2 ? (uint32_t)(v->driver_features >> (32 * v->gfsel)) : 0;
-    case 0x10: return 0xffff;                  /* config_msix_vector: no MSI-X */
+    /* config_msix_vector. There is no MSI-X, and "no vector" is what it starts as; but virtio-win's GPU driver
+       writes vector 0 whatever its interrupt is, and gives the device up unless it reads 0 back. */
+    case 0x10: return v->msix_config;
     case 0x12: return v->nq;
     case 0x14: return v->status;
     case 0x15: return v->config_gen;
@@ -75,8 +78,13 @@ static void set64(uint64_t *f, uint64_t off, uint64_t v, unsigned size) {
 
 static void common_write(HvVirtio *v, uint64_t off, uint64_t val, unsigned size) {
     HvVirtq *q = v->qsel < v->nq ? &v->q[v->qsel] : NULL;
+    static int log = -1; /* HV_VIRTIO_LOG=ID: a device's set-up by its driver (16 is the GPU) */
+    if (log < 0) log = getenv("HV_VIRTIO_LOG") ? atoi(getenv("HV_VIRTIO_LOG")) : 0;
+    if (log && log == (v->pci.config[2] | v->pci.config[3] << 8) - 0x1040)
+        fprintf(stderr, "virtio %d: common +%#llx = %#llx (%u)\n", log, (unsigned long long)off, (unsigned long long)val, size);
     switch (off) {
     case 0x00: v->dfsel = (uint32_t)val; break;
+    case 0x10: v->msix_config = (uint16_t)val; break;
     case 0x08: v->gfsel = (uint32_t)val; break;
     case 0x0c:
         if (v->gfsel < 2) {
@@ -85,7 +93,10 @@ static void common_write(HvVirtio *v, uint64_t off, uint64_t val, unsigned size)
         }
         break;
     case 0x14:
-        if ((uint8_t)val == 0) reset(v);
+        if ((uint8_t)val == 0) {
+            reset(v);
+            if (v->was_reset) v->was_reset(v);
+        }
         else v->status = (uint8_t)val;
         break;
     case 0x16: v->qsel = (uint16_t)val; break;

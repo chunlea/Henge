@@ -34,7 +34,7 @@ static HvRam *ram_of(HvMachine *m, uint64_t pa) {
 /* A descriptor: RAM, 8 bytes, aligned. Device memory as a page table is not supported. */
 static int read_desc(HvMachine *m, uint64_t pa, uint64_t *out) {
     HvRam *r = ram_of(m, pa);
-    if (!r || pa + 8 - r->pa > r->size) return -1;
+    if (!r || r->page_host || pa + 8 - r->pa > r->size) return -1;
     *out = __atomic_load_n((const uint64_t *)(const void *)(r->host + (pa - r->pa)), __ATOMIC_RELAXED);
     return 0;
 }
@@ -830,6 +830,14 @@ static void tlb_fill(HvCpu *cpu, uint64_t va, int el, const HvWalk *w) {
         if (cpu->nkernel_fills <= HV_KERNEL_FILLS) cpu->nkernel_fills++;
     }
     e->addend = (int64_t)((uint64_t)(uintptr_t)(ram->host + (page_pa - ram->pa)) - page_va);
+    if (ram->page_host) { /* a paged region: the page's own place */
+        uint8_t *hp = __atomic_load_n(&ram->page_host[pg], __ATOMIC_ACQUIRE);
+        if (!hp) {
+            memset(e, 0x80, sizeof *e); /* nothing behind it: every access the slow way (reads as ones, keeps nothing) */
+            return;
+        }
+        e->addend = (int64_t)((uint64_t)(uintptr_t)hp - page_va);
+    }
     e->read_tag = w->r ? page_va - HV_TLB_ADJ : HV_TLB_INVALID;
     /* Writes to ROM or to pages we translated from take the slow path. */
     e->write_tag = w->w && !ram->readonly && !ram->code_pages[pg] ? page_va - HV_TLB_ADJ : HV_TLB_INVALID;

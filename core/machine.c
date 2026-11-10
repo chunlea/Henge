@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #include "mmu.h"
 #include "sysreg.h"
@@ -448,6 +449,32 @@ int hv_machine_add_ram(HvMachine *m, uint64_t pa, uint64_t size, void *host, int
     return 0;
 }
 
+HvRam *hv_machine_add_paged_ram(HvMachine *m, uint64_t pa, uint64_t size) {
+    if (HV_TLB_PAGE_BITS != 12 || m->nram == HV_MAX_RAM) return NULL;
+    HvRam *r = &m->ram[m->nram];
+    r->page_host = calloc(size >> 12, sizeof *r->page_host);
+    if (!r->page_host || hv_machine_add_ram(m, pa, size, NULL, 0) != 0) return NULL;
+    return r;
+}
+
+void hv_ram_set_pages(HvMachine *m, HvRam *r, uint64_t first, uint64_t npages, uint8_t *host) {
+    for (uint64_t i = 0; i < npages && first + i < r->npages; i++)
+        __atomic_store_n(&r->page_host[first + i], host ? host + (i << 12) : NULL, __ATOMIC_RELEASE);
+    if (host) return;
+    uint32_t epoch = __atomic_add_fetch(&m->tlb_epoch, 1, __ATOMIC_SEQ_CST);
+    for (int tries = 0; tries < 40000; tries++) { /* two seconds at most: a CPU that is not running has nothing to run with */
+        int all = 1;
+        for (int i = 0; i < m->ncpus; i++) {
+            HvCpu *c = m->cpus[i];
+            if (c && !c->off && !c->halted && __atomic_load_n(&c->tlb_epoch_seen, __ATOMIC_ACQUIRE) != epoch) all = 0;
+        }
+        if (all) return;
+        hv_machine_kick_all(m);
+        usleep(50);
+    }
+    fprintf(stderr, "hengevm: a CPU did not empty its TLB in two seconds (pages taken from a paged region)\n");
+}
+
 int hv_machine_add_mmio(HvMachine *m, uint64_t pa, uint64_t size, void *opaque,
                         uint64_t (*read)(void *, uint64_t, unsigned),
                         void (*write)(void *, uint64_t, uint64_t, unsigned), const char *name) {
@@ -558,6 +585,11 @@ HvMmio *hv_mmio_lookup(HvMachine *m, uint64_t pa) {
 void *hv_phys_ptr(HvMachine *m, uint64_t pa, uint64_t len) {
     HvRam *r = hv_ram_lookup(m, pa);
     if (!r || pa + len - r->pa > r->size) return NULL;
+    if (r->page_host) { /* within one page, if the page is there */
+        uint64_t off = pa - r->pa;
+        uint8_t *p = __atomic_load_n(&r->page_host[off >> 12], __ATOMIC_ACQUIRE);
+        return p && (off & 0xfff) + len <= 0x1000 ? p + (off & 0xfff) : NULL;
+    }
     return r->host + (pa - r->pa);
 }
 
@@ -582,6 +614,11 @@ int hv_phys_read(HvMachine *m, uint64_t pa, void *buf, unsigned len) {
 
 int hv_phys_write(HvMachine *m, uint64_t pa, const void *buf, unsigned len) {
     HvRam *r = hv_ram_lookup(m, pa);
+    if (r && r->page_host) {
+        void *p = hv_phys_ptr(m, pa, len);
+        if (p) memcpy(p, buf, len);
+        return p || len <= 8 ? 0 : -1; /* a page with nothing behind it takes writes and keeps nothing */
+    }
     if (r && pa + len - r->pa <= r->size) {
         if (r->readonly) return 0; /* ROM: writes are ignored */
         uint64_t off = pa - r->pa;

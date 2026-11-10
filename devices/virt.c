@@ -132,6 +132,12 @@ int hv_virt_create(HvVmapple *b, HvMachine *m, HvCpu *cpus, const HvVirtParams *
         b->mouse = hv_virtio_input_create(m, b->pcie, HV_VINPUT_MOUSE);
     }
 
+    /* A GPU beside the firmware's framebuffer: Windows draws in the framebuffer until its driver for this one
+       (viogpu3d) is installed and takes the display. */
+    if (p->gpu_dir) {
+        b->gpu = hv_virtio_gpu_create_d3d(m, b->pcie, p->screen_width ? p->screen_width : 1280, p->screen_height ? p->screen_height : 800, p->gpu_dir);
+        if (b->gpu) standard_ids(&b->gpu->vio);
+    }
     standard_ids(b->root_blk ? &b->root_blk->vio : NULL);
     standard_ids(b->aux_blk ? &b->aux_blk->vio : NULL);
     standard_ids(b->net ? &b->net->vio : NULL);

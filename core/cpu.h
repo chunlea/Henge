@@ -179,6 +179,7 @@ typedef struct HvCpu {
     /* With ASIDs in TTBR1 (TCR_EL1.A1, as Linux has them): TTBR0 points at a top-level table with nothing in it,
        which is where Linux leaves it between one process and the next. No user address space then (hv_user_key 0). */
     int user_parked;
+    uint32_t tlb_epoch_seen; /* the machine's tlb_epoch this CPU last emptied its TLB for */
 } HvCpu;
 
 #define HV_CPU_X(n)        ((n) * 8)

@@ -39,11 +39,13 @@ typedef struct HvVirtio {
     uint32_t dfsel, gfsel;
     uint8_t status, isr, config_gen;
     uint16_t qsel, nq;
+    uint16_t msix_config;      /* what the driver wrote as the config interrupt's vector, read back (there is no MSI-X) */
     HvVirtq q[HV_VIRTQ_MAX];
     uint8_t config[256];
     uint32_t config_len;
     void (*notify)(struct HvVirtio *v, int q);
     void (*config_write)(struct HvVirtio *v, uint32_t off, uint64_t val, unsigned size);
+    void (*was_reset)(struct HvVirtio *v); /* the driver reset the device (status 0): its queues are gone */
     void *dev;
 } HvVirtio;
 

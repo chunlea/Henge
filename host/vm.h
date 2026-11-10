@@ -32,6 +32,7 @@ typedef struct HvVmConfig {
     const char *uefi_code;    /* the firmware: QEMU's edk2-aarch64-code.fd */
     const char *uefi_vars;    /* where the firmware keeps its variables (NULL: not kept) */
     const char *cdrom;        /* a second disk, read-only: installation media (NULL: none) */
+    const char *uefi_gpu;     /* a GPU for a UEFI guest with UTM's Direct3D driver: the folder of frameworks (NULL: none) */
 } HvVmConfig;
 
 /* Returns 0, or -1 with a reason in err. */

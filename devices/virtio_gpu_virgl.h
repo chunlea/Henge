@@ -7,6 +7,11 @@
 /* virtio-gpu's 3D side: virglrenderer on ANGLE (OpenGL ES on Metal), loaded from the frameworks in dir.
    NULL when they cannot be loaded or started (the device then stays 2D). */
 HvGpuVirgl *hv_gpu_virgl_start(HvVirtioGpu *g, const char *dir);
+/* How many capability sets the device has (its config says). */
+uint32_t hv_gpu_virgl_capsets(HvGpuVirgl *v);
+/* CPU thread, device lock held: the driver reset the device. What it had queued is forgotten, and the worker
+   lets go of every resource and context. */
+void hv_gpu_virgl_reset(HvGpuVirgl *v);
 /* Route the device's queues to it (once the virtqueues exist). */
 void hv_gpu_virgl_attach(HvGpuVirgl *v);
 /* CPU 0, device lock held: finished requests back to the guest. */
