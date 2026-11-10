@@ -37,6 +37,9 @@ static HvInsnKind classify_system(uint32_t insn) {
             (void)op2;
             return HV_INSN_BARRIER;
         }
+        /* CFINV (FEAT_FlagM, which ID_AA64ISAR0 says is there): the carry flag turned over, at any EL.
+           Windows' x86 emulator's code uses it. */
+        if (insn == 0xd500401fu) return HV_INSN_COPY;
         if (l == 0 && crn == 4) return HV_INSN_SYSREG; /* MSR (immediate) to PSTATE */
         if (l == 0 && crn == 1 && op1 == 3 && (insn & 0x1f) == 0x1f) {
             /* WFET, WFIT (FEAT_WFxT) live in CRn=1. */
