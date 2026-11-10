@@ -227,9 +227,17 @@ static void load_segment(HvXhci *x, struct HvXhciIntr *it) {
 
 static void event_to(HvXhci *x, int target, uint64_t param, uint32_t status, uint32_t control) {
     struct HvXhciIntr *it = &x->intr[target < HV_XHCI_INTRS ? target : 0];
-    if (!it->erstsz || !it->seg_size) return;
+    if (!it->erstsz || !it->seg_size || !(x->usbcmd & 1)) return; /* a stopped controller writes nothing (port changes are sent again when it runs) */
     uint32_t trb[4] = {(uint32_t)param, (uint32_t)(param >> 32), status, (control & ~1u) | (uint32_t)it->pcs};
-    wr(x, it->seg_base + 16ull * it->index, trb, 16);
+    /* The word with the cycle bit goes last, and whole: the driver may be reading the ring on another CPU
+       at this moment, and the bit is what tells it the entry is there. An event seen with the parameter of
+       whatever was in the ring before is a wild pointer in the driver's hands (Windows keeps its own in an
+       Event Data TRB's: it stopped with KERNEL_MODE_HEAP_CORRUPTION now and then). */
+    uint64_t at = it->seg_base + 16ull * it->index;
+    uint32_t *ctl = hv_phys_ptr(x->m, at + 12, 4);
+    if (!ctl) return;
+    wr(x, at, trb, 12);
+    __atomic_store_n(ctl, trb[3], __ATOMIC_RELEASE);
     if (++it->index == it->seg_size) { /* next segment, or wrap and flip the cycle */
         if (++it->seg_index >= it->erstsz) {
             it->seg_index = 0;
@@ -1557,7 +1565,7 @@ void hv_xhci_pointer(HvXhci *x, int px, int py, int buttons, int wheel) {
 }
 
 void hv_xhci_poll(HvXhci *x) {
-    if (!x) return;
+    if (!x || !(x->usbcmd & 1)) return; /* stopped: the rings it knew may be anyone's memory by now */
     for (int slot = 1; slot <= HV_XHCI_SLOTS; slot++) {
         if (x->slots[slot].dev < 0) continue;
         if (x->pc) pc_run(x, slot, 3);
