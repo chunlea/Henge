@@ -65,6 +65,14 @@ over several chained TRBs.
   event ring on other CPUs while it is being written, and an event's parameter is a
   pointer of its own.
 
+- A level interrupt that is taken again and again with its line never dropping waits a moment before
+  each next time (`devices/gicv3.c`). Windows' NVMe driver takes a completion off its queue and writes
+  the queue's head back a few instructions later; interrupted in between, on the CPU that takes the
+  controller's interrupt, it has a handler that finds nothing new and an interrupt that stays up until
+  those few instructions run. A real distributor takes long enough to signal again that they do. Here
+  the interrupt came back the instant its handler ended, and the machine hung: at about one start in
+  six, with the firmware's picture still on the screen, or later with an "interrupt storm" in the log.
+
 Windows switches both `TTBR0_EL1` and `TTBR1_EL1` for each process, with the address
 space ID in `TTBR1` (`TCR_EL1.A1`). The engine empties its TLB on each such switch,
 which is right and slow. It is the first thing to look at for speed.
@@ -128,12 +136,15 @@ its Details type what Setup needs: the LabConfig settings above, and `oobe\bypas
 
 ## Not there yet
 
-- No sound, no display driver (so one resolution, drawn by the CPU), no clipboard or
-  shared folder.
+- No sound, no clipboard or shared folder.
+- No display driver, so Windows draws with the CPU in the framebuffer its boot manager chose and
+  its Settings cannot change the size. The firmware offers 640x480, 800x600 and 1024x768, and the
+  boot manager takes 800x600 unless told `bcdedit /set {globalsettings} highestmode on` (from an
+  administrator's prompt; the iOS session's Details type it). More than that needs a display
+  driver: virtio-win's viogpudo, on a virtio-gpu device, is the one to try.
 - A restart ends `hengevm`: it has to be started again (a shell loop does). The
   firmware then starts Windows Boot Manager from the disk, whose entry Windows wrote to
   the firmware's variables.
-- Seen once and not explained: an interrupt storm on the NVMe line a third of the way
-  into Setup's second stage, after the fix above. `hengevm` names the interrupt and
-  prints the controller's state when it happens (`hv_nvme_dump`).
+- Now and then (one start in ten, with ten machines starting at once) Windows stops with a bug check
+  soon after its desktop comes up, and restarts. Not looked into yet.
 - Seen once under heavy host load: `hengevm` processes that did not exit on SIGTERM.
