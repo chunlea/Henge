@@ -157,8 +157,11 @@ unsigned char *hv_uefi_make_dtb(const HvVmapple *b, size_t *len) {
     reg2(c, VIRT_PCIE_ECAM, VIRT_PCIE_ECAM_SIZE);
     hv_fdt_prop_cells(&f, "reg", c, 4);
     uint32_t ranges[] = {0x01000000, 0, 0, 0, (uint32_t)VIRT_PCIE_PIO, 0, 0x10000,
-                         0x02000000, 0, (uint32_t)VIRT_PCIE_MMIO, 0, (uint32_t)VIRT_PCIE_MMIO, 0, (uint32_t)VIRT_PCIE_MMIO_SIZE};
-    hv_fdt_prop_cells(&f, "ranges", ranges, 14);
+                         0x02000000, 0, (uint32_t)VIRT_PCIE_MMIO, 0, (uint32_t)VIRT_PCIE_MMIO, 0, (uint32_t)VIRT_PCIE_MMIO_SIZE,
+                         0x03000000, (uint32_t)(VIRT_PCIE_MMIO64 >> 32), (uint32_t)VIRT_PCIE_MMIO64,
+                         (uint32_t)(VIRT_PCIE_MMIO64 >> 32), (uint32_t)VIRT_PCIE_MMIO64,
+                         (uint32_t)(VIRT_PCIE_MMIO64_SIZE >> 32), (uint32_t)VIRT_PCIE_MMIO64_SIZE};
+    hv_fdt_prop_cells(&f, "ranges", ranges, 21);
     hv_fdt_prop_empty(&f, "dma-coherent");
     uint32_t mask[] = {0xf800, 0, 0, 0};
     hv_fdt_prop_cells(&f, "interrupt-map-mask", mask, 4);

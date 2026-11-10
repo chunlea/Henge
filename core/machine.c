@@ -425,7 +425,9 @@ void hv_machine_free(HvMachine *m) {
 
 int hv_machine_add_ram(HvMachine *m, uint64_t pa, uint64_t size, void *host, int readonly) {
     if (m->nram == HV_MAX_RAM) return -1;
-    HvRam *r = &m->ram[m->nram++];
+    /* Counted once it is whole: a region may be added while CPUs run (a device's shared memory, when its
+       driver first maps some), and they look through the regions there are. */
+    HvRam *r = &m->ram[m->nram];
     r->pa = pa;
     r->size = size;
     r->host = host;
@@ -441,7 +443,9 @@ int hv_machine_add_ram(HvMachine *m, uint64_t pa, uint64_t size, void *host, int
     r->whint = calloc(pages * HV_MAX_CPUS, sizeof *r->whint);
     r->ijc_va = calloc(pages, sizeof *r->ijc_va);
     r->xhead = calloc(pages, sizeof *r->xhead);
-    return r->code_pages && r->page_gen && r->whint && r->ijc_va && r->xhead ? 0 : -1;
+    if (!(r->code_pages && r->page_gen && r->whint && r->ijc_va && r->xhead)) return -1;
+    __atomic_store_n(&m->nram, m->nram + 1, __ATOMIC_RELEASE);
+    return 0;
 }
 
 int hv_machine_add_mmio(HvMachine *m, uint64_t pa, uint64_t size, void *opaque,

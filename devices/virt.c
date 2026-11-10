@@ -108,6 +108,7 @@ int hv_virt_create(HvVmapple *b, HvMachine *m, HvCpu *cpus, const HvVirtParams *
     b->fwcfg->dir_selected = ramfb_sizes, b->fwcfg->dir_opaque = b;
     b->pcie = hv_pcie_create(m, b->gic, VIRT_PCIE_ECAM, VIRT_PCIE_ECAM_SIZE, VIRT_PCIE_MMIO, VIRT_PCIE_MMIO_SIZE,
                              32 + VIRT_IRQ_PCIE);
+    hv_pcie_add_window(b->pcie, VIRT_PCIE_MMIO64, VIRT_PCIE_MMIO64_SIZE);
     hv_machine_add_mmio(m, VIRT_PCIE_PIO, 0x10000, b, pio_read, pio_write, "pcie-pio");
     /* HV_VIRT_DISK=virtio: the disk as a virtio one instead (debugging). */
     const char *kind = getenv("HV_VIRT_DISK");

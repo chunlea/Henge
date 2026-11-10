@@ -40,7 +40,10 @@ HvPcie *hv_pcie_create(HvMachine *m, HvGic *gic, uint64_t ecam_pa, uint64_t ecam
 /* Fills in the header; the caller then adds BARs and capabilities. */
 void hv_pci_init(HvPciDev *d, uint16_t vendor, uint16_t device, uint32_t class_rev, uint16_t sub_vendor,
                  uint16_t sub_id);
+/* is64: 0 a 32-bit BAR, 1 a 64-bit one, 2 a 64-bit prefetchable one (memory, not registers: it may go above 4 GB). */
 void hv_pci_add_bar(HvPciDev *d, int bar, uint64_t size, int is64);
+/* A second window BARs may be given addresses in (the 64-bit one, above RAM). */
+void hv_pcie_add_window(HvPcie *p, uint64_t mmio_pa, uint64_t mmio_size);
 int hv_pcie_attach(HvPcie *p, HvPciDev *d); /* returns the slot, or -1 */
 uint64_t hv_pci_bar_addr(HvPciDev *d, int bar);
 void hv_pci_set_intx(HvPciDev *d, int level);
