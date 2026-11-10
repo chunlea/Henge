@@ -4,24 +4,28 @@ import SwiftUI
 struct StoppedMacView: View {
     let outcome: Int32
     let reason: String
+    var linux = false
     var start: (() -> Void)? = nil
     let close: () -> Void
 
+    private var name: String { linux ? "Linux" : "Mac" }
+
     private var title: String {
         switch outcome {
-        case Int32(HENGE_VM_OUTCOME_SHUTDOWN.rawValue): return "Mac shut down"
-        case Int32(HENGE_VM_OUTCOME_RESTART.rawValue): return "Mac requested a restart"
-        case Int32(HENGE_VM_OUTCOME_HOST_STOP.rawValue): return "Mac stopped"
-        default: return "Mac stopped unexpectedly"
+        case Int32(HENGE_VM_OUTCOME_SHUTDOWN.rawValue): return "\(name) shut down"
+        case Int32(HENGE_VM_OUTCOME_RESTART.rawValue): return "\(name) requested a restart"
+        case Int32(HENGE_VM_OUTCOME_HOST_STOP.rawValue): return "\(name) stopped"
+        default: return "\(name) stopped unexpectedly"
         }
     }
 
     private var detail: String {
-        let next = "You can start this Mac again or return to your Macs."
+        let next = linux ? "You can start this machine again or return to your Linux machines."
+                         : "You can start this Mac again or return to your Macs."
         switch outcome {
         case Int32(HENGE_VM_OUTCOME_SHUTDOWN.rawValue), Int32(HENGE_VM_OUTCOME_HOST_STOP.rawValue): return next
-        case Int32(HENGE_VM_OUTCOME_RESTART.rawValue): return "The Mac is ready to start again."
-        default: return "The Mac stopped: \(reason). " + next
+        case Int32(HENGE_VM_OUTCOME_RESTART.rawValue): return linux ? "Linux is ready to start again." : "The Mac is ready to start again."
+        default: return "\(linux ? "Linux" : "The Mac") stopped: \(reason). " + next
         }
     }
 
@@ -31,7 +35,7 @@ struct StoppedMacView: View {
             Text(title).font(.headline)
             Text(detail).font(.subheadline).foregroundStyle(.white.opacity(0.7))
                 .multilineTextAlignment(.center)
-            if let start { Button("Start Mac", action: start).buttonStyle(.borderedProminent) }
+            if let start { Button(linux ? "Start Linux" : "Start Mac", action: start).buttonStyle(.borderedProminent) }
             Button("Close", action: close).buttonStyle(.bordered)
         }
         .foregroundStyle(.white)

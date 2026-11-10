@@ -63,8 +63,8 @@ static int begin_start(char *err, size_t errlen) {
     pthread_rwlock_wrlock(&api_lock);
     if ((state != 0 && state != 2) || installer_session) {
         snprintf(err, errlen, "%s", installer_session
-                 ? "The installer is still attached. Quit Henge and open it again before starting a Mac."
-                 : "The previous Mac is still running or finishing its shutdown.");
+                 ? "The installer is still attached. Quit Henge and open it again before starting a machine."
+                 : "The previous machine is still running or finishing its shutdown.");
         pthread_rwlock_unlock(&api_lock);
         return -1;
     }
@@ -84,7 +84,7 @@ static int started(char *err, size_t errlen) {
     exit_reason = exit_outcome = 0;
     state = 1;
     if (hv_vm_start(1, on_exit) != 0) {
-        snprintf(err, errlen, "There are not enough resources to start the Mac's CPU threads.");
+        snprintf(err, errlen, "There are not enough resources to start the machine's CPU threads.");
         return failed_start();
     }
     atomic_fetch_add(&generation, 1);

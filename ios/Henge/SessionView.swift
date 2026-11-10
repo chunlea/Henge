@@ -65,7 +65,7 @@ struct SessionView: View {
                         if display.isExternal && state != 2 {
                             VStack(spacing: 8) {
                                 Image(systemName: "display").font(.largeTitle)
-                                Text("Mac on external display").font(.headline)
+                                Text(mac.isLinux ? "Linux on external display" : "Mac on external display").font(.headline)
                                 Text("Use the trackpad, keyboard or a connected mouse.")
                                     .font(.subheadline)
                             }
@@ -100,7 +100,7 @@ struct SessionView: View {
                         floatingControls(layout)
                     }
                     if pointerRefused && !showRevealHint {
-                        Label("Make Henge full screen to use the trackpad or mouse as the Mac's", systemImage: "cursorarrow.rays")
+                        Label("Make Henge full screen to use the trackpad or mouse as \(mac.isLinux ? "Linux's" : "the Mac's")", systemImage: "cursorarrow.rays")
                             .font(.system(size: 15, weight: .medium))
                             .foregroundStyle(.white)
                             .padding(.horizontal, 18).padding(.vertical, 12)
@@ -134,7 +134,7 @@ struct SessionView: View {
                 }
                 if state == 2 {
                     StoppedMacView(outcome: henge_vm_exit_outcome(), reason: String(cString: henge_vm_exit_reason()),
-                                   start: { bootAttempt += 1 }, close: close)
+                                   linux: mac.isLinux, start: { bootAttempt += 1 }, close: close)
                         .frame(width: min(layout.touch.width - 32, 360))
                         .position(x: layout.touch.midX, y: layout.fillsPhone ? layout.touch.midY : layout.pad.midY)
                 }
@@ -168,7 +168,7 @@ struct SessionView: View {
         .confirmationDialog("Shut down \(mac.name)?", isPresented: $confirmStop, titleVisibility: .visible) {
             Button("Shut Down", role: .destructive) { finish() }
         } message: {
-            Text("This turns the Mac off at once. Anything not saved on it is lost.")
+            Text("This turns \(mac.isLinux ? "the machine" : "the Mac") off at once. Anything not saved on it is lost.")
         }
         .onChange(of: zoomed) { on in
             zoomFollowing?.cancel()
@@ -457,7 +457,7 @@ struct SessionView: View {
 
     private func errorCard(_ text: String, _ layout: Layout) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("This Mac could not start").font(.system(size: 17, weight: .semibold))
+            Text(mac.isLinux ? "This machine could not start" : "This Mac could not start").font(.system(size: 17, weight: .semibold))
             Text(text).font(.system(size: 14)).foregroundStyle(Desk.dim)
             Button("Close") { close() }.font(.system(size: 15, weight: .semibold)).foregroundStyle(Desk.accentLight)
         }
@@ -470,7 +470,7 @@ struct SessionView: View {
     private var phase: String {
         switch state {
         case 0: return error == nil ? "Starting…" : "Not started"
-        case 1: return userCode ? "macOS is running" : "Booting"
+        case 1: return userCode ? (mac.isLinux ? "Linux is running" : "macOS is running") : "Booting"
         case 3: return "Finishing shutdown…"
         default: return "Stopped (\(String(cString: henge_vm_exit_reason())))"
         }
@@ -490,7 +490,7 @@ struct SessionView: View {
                     Toggle("Color matching", isOn: $matchScreenColors)
                     LabeledContent("Brightness", value: "\(Int(screenBrightness * 100))%")
                     Slider(value: $screenBrightness, in: 0.4...1)
-                    Text("Brightness dims only the Mac's screen.")
+                    Text("Brightness dims only \(mac.isLinux ? "Linux's" : "the Mac's") screen.")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
                 Section("Pointer") {
@@ -503,9 +503,10 @@ struct SessionView: View {
                     Toggle("Sharp edges", isOn: $sharpCursor)
                     LabeledContent("Scroll speed", value: String(format: "%.1f×", scrollSpeed))
                     Slider(value: $scrollSpeed, in: 0.1...1.5)
-                    Text("The Mac supplies a small pointer image. Enlarging it can look blurry; 1× is the sharpest on an iPad. Scroll speed changes apply immediately.")
+                    Text("\(mac.isLinux ? "Linux" : "The Mac") supplies a small pointer image. Enlarging it can look blurry; 1× is the sharpest on an iPad. Scroll speed changes apply immediately.")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
+                if !mac.isLinux {
                 Section("Sharing") {
                     LabeledContent("Clipboard and folder", value: helperRunning ? "On" : "Not set up")
                     if !helperRunning {
@@ -539,6 +540,7 @@ struct SessionView: View {
                     }
                     Text("Less drawing for the emulated CPUs: window and Dock animations, desktop widgets, the screen saver and a moving wallpaper go. Open Terminal on the Mac, tap the button and press Return, then log out and back in. Also turn on Reduce Motion and Reduce Transparency in the Mac's System Settings, Accessibility. Undo puts it back, apart from the wallpaper. Needs the Mac's keyboard layout to be U.S.")
                         .font(.footnote).foregroundStyle(.secondary)
+                }
                 }
                 Section("Log") {
                     VStack(alignment: .leading, spacing: 1) {
@@ -589,7 +591,7 @@ struct SessionView: View {
         let ram = GuestMemory.prepare(mac)
         HengeLog.log("session", "available memory \(henge_available_memory() >> 20) MB")
         guard ram >= 1024 else {
-            error = "There is not room for this Mac's memory: it needs a few GB of free storage."
+            error = "There is not room for this \(mac.isLinux ? "machine" : "Mac")'s memory: it needs a few GB of free storage."
             return
         }
         var buffer = [CChar](repeating: 0, count: 256)
@@ -669,7 +671,7 @@ struct SessionView: View {
                 lastGPUFrames = gpuFrames
                 JITBootstrap.releaseLingeringDebugger()
             }
-            if tick == 60 && !stillWallpaperTipShown { // about when the desktop is up after a login
+            if tick == 60 && !stillWallpaperTipShown && !mac.isLinux { // about when the desktop is up after a login
                 stillWallpaperTipShown = true
                 showWallpaperTip = true
                 DispatchQueue.main.asyncAfter(deadline: .now() + 10) { showWallpaperTip = false }
