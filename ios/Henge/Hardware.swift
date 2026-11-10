@@ -24,6 +24,10 @@ enum Device {
         return (1280, min(max(Int((1280 / shape / 8).rounded()) * 8, 720), 960))
     }
 
+    /// A Windows machine's screen: what the UEFI firmware's display starts as, which Windows goes on drawing in
+    /// (it has no display driver for this machine).
+    static let windowsScreen = (width: 800, height: 600)
+
     /// Preserve the iPad's shape while reducing the virtual GPU's pixel work.
     static var performanceScreen: (width: Int, height: Int) {
         let fit = fittingScreen

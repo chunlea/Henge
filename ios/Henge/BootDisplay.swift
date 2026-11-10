@@ -11,6 +11,8 @@ struct BootDisplay: View {
     let role: DisplayTargetSelection.Role
     /// The id this view's layer connects to the router under.
     var surface = UUID()
+    /// What shows before the machine has drawn anything.
+    var logo = "apple.logo"
 
     @State private var image: CGImage?
     @State private var gpuLive = false
@@ -26,12 +28,12 @@ struct BootDisplay: View {
                     if let image {
                         Image(decorative: image, scale: 1).resizable().interpolation(.medium).aspectRatio(contentMode: .fit)
                         if image.height > image.width {
-                            Image(systemName: "apple.logo")
+                            Image(systemName: logo)
                                 .font(.system(size: 44))
                                 .foregroundStyle(.white)
                         }
                     } else {
-                        Image(systemName: "apple.logo")
+                        Image(systemName: logo)
                             .font(.system(size: 44))
                             .foregroundStyle(.white)
                     }

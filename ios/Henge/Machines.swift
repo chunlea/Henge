@@ -26,11 +26,22 @@ struct VirtualMac: Identifiable, Codable, Hashable {
     /// boot entry. nil for a Mac, as every machine made before Linux was.
     var system: String?
     var isLinux: Bool { system == "linux" }
+    /// "windows" for a Windows on Arm machine (WindowsView.swift): a disk, the UEFI firmware's variables and,
+    /// until Windows is installed, the installation disc.
+    var isWindows: Bool { system == "windows" }
+    var isMac: Bool { !isLinux && !isWindows }
+    /// What the machine is, in the session's words.
+    var guestName: String { isWindows ? "Windows" : isLinux ? "Linux" : "Mac" }
+    var theGuest: String { isMac ? "The Mac" : guestName }
+    var theGuests: String { isMac ? "the Mac's" : guestName + "'s" }
 
     var directory: URL { Machines.directory(for: id) }
     var rom: URL { directory.appendingPathComponent("AVPBooter.vmapple2.bin") }
     var disk: URL { directory.appendingPathComponent("disk.img") }
     var aux: URL { directory.appendingPathComponent("auxiliary.bin") }
+    /// A Windows machine's: what the UEFI firmware remembers (its boot entries), and the disc Windows is installed from.
+    var vars: URL { directory.appendingPathComponent("vars.fd") }
+    var media: URL { directory.appendingPathComponent("install.iso") }
 }
 
 /// How much RAM a Mac gets. The engine first asks the kernel to leave it out of Henge's footprint,
@@ -126,7 +137,7 @@ final class Machines: ObservableObject {
                 let os = (try? String(contentsOf: marker, encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
                 mac.osName = os.isEmpty ? nil : os
                 mac.system = info.system
-                (mac.screenWidth, mac.screenHeight) = mac.isLinux ? Device.linuxScreen : Device.fittingScreen
+                (mac.screenWidth, mac.screenHeight) = mac.isWindows ? Device.windowsScreen : mac.isLinux ? Device.linuxScreen : Device.fittingScreen
                 all.append(mac)
                 save()
                 try? fm.removeItem(at: item.appendingPathComponent("restore"))

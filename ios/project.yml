@@ -105,6 +105,14 @@ targets:
           set -e
           cp "$SRCROOT/../build/henge-agent.gz" "$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/henge-agent.gz"
         basedOnDependencyAnalysis: false
+      - name: Bundle the UEFI firmware
+        # What Windows machines start from (scripts/fetch_uefi.sh). Without it the Windows tab says so.
+        script: |
+          set -e
+          SRC="$SRCROOT/deps/uefi/edk2-aarch64-code.fd.gz"
+          if [ ! -f "$SRC" ]; then echo "warning: no $SRC (scripts/fetch_uefi.sh): Windows machines cannot start"; exit 0; fi
+          cp "$SRC" "$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/edk2-aarch64-code.fd.gz"
+        basedOnDependencyAnalysis: false
       - name: Embed StikJIT
         # As in Husk: the helper links StikJIT; it lives in the app's Frameworks
         # with a minimal Info.plist (installd refuses one without), signed here.

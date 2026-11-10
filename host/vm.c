@@ -801,6 +801,16 @@ int hv_vm_snapshot(uint8_t *bgra, int width, int height) {
         }
         return 0;
     }
+    if (board.fwcfg) { /* UEFI: the firmware's framebuffer, the same way */
+        HvBootDisplay d;
+        if (width <= 0 || height <= 0 || hv_vm_boot_display(&d) != 0 || !d.width || !d.height) return -1;
+        uint32_t *dst = (uint32_t *)(void *)bgra;
+        for (int y = 0; y < height; y++) {
+            const uint32_t *row = (const uint32_t *)(const void *)(d.pixels + (uint64_t)y * d.height / (uint64_t)height * d.stride);
+            for (int x = 0; x < width; x++) dst[y * width + x] = row[(uint64_t)x * d.width / (uint64_t)width] | 0xff000000u;
+        }
+        return 0;
+    }
     HvPvgLite *pvg = atomic_load_explicit(&display_pvg, memory_order_acquire);
     if (!pvg || width <= 0 || height <= 0) return -1;
     return hv_pvg_lite_snapshot(pvg, bgra, (uint32_t)width, (uint32_t)height);

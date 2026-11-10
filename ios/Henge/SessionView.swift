@@ -59,13 +59,13 @@ struct SessionView: View {
             ZStack(alignment: .topLeading) {
                 (landscape || zoomed ? Color.black : Desk.page)
                 // One view in every layout: it holds the layer the engine draws into.
-                BootDisplay(display: display, role: .device)
+                BootDisplay(display: display, role: .device, logo: mac.isWindows ? "pc" : "apple.logo")
                     .opacity(display.isExternal ? 0 : 1)
                     .overlay {
                         if display.isExternal && state != 2 {
                             VStack(spacing: 8) {
                                 Image(systemName: "display").font(.largeTitle)
-                                Text(mac.isLinux ? "Linux on external display" : "Mac on external display").font(.headline)
+                                Text("\(mac.guestName) on external display").font(.headline)
                                 Text("Use the trackpad, keyboard or a connected mouse.")
                                     .font(.subheadline)
                             }
@@ -100,7 +100,7 @@ struct SessionView: View {
                         floatingControls(layout)
                     }
                     if pointerRefused && !showRevealHint {
-                        Label("Make Henge full screen to use the trackpad or mouse as \(mac.isLinux ? "Linux's" : "the Mac's")", systemImage: "cursorarrow.rays")
+                        Label("Make Henge full screen to use the trackpad or mouse as \(mac.theGuests)", systemImage: "cursorarrow.rays")
                             .font(.system(size: 15, weight: .medium))
                             .foregroundStyle(.white)
                             .padding(.horizontal, 18).padding(.vertical, 12)
@@ -134,7 +134,7 @@ struct SessionView: View {
                 }
                 if state == 2 {
                     StoppedMacView(outcome: henge_vm_exit_outcome(), reason: String(cString: henge_vm_exit_reason()),
-                                   linux: mac.isLinux, start: { bootAttempt += 1 }, close: close)
+                                   guest: mac.guestName, start: { bootAttempt += 1 }, close: close)
                         .frame(width: min(layout.touch.width - 32, 360))
                         .position(x: layout.touch.midX, y: layout.fillsPhone ? layout.touch.midY : layout.pad.midY)
                 }
@@ -168,7 +168,7 @@ struct SessionView: View {
         .confirmationDialog("Shut down \(mac.name)?", isPresented: $confirmStop, titleVisibility: .visible) {
             Button("Shut Down", role: .destructive) { finish() }
         } message: {
-            Text("This turns \(mac.isLinux ? "the machine" : "the Mac") off at once. Anything not saved on it is lost.")
+            Text("This turns \(mac.isMac ? "the Mac" : "the machine") off at once. Anything not saved on it is lost.")
         }
         .onChange(of: zoomed) { on in
             zoomFollowing?.cancel()
@@ -457,7 +457,7 @@ struct SessionView: View {
 
     private func errorCard(_ text: String, _ layout: Layout) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(mac.isLinux ? "This machine could not start" : "This Mac could not start").font(.system(size: 17, weight: .semibold))
+            Text(mac.isMac ? "This Mac could not start" : "This machine could not start").font(.system(size: 17, weight: .semibold))
             Text(text).font(.system(size: 14)).foregroundStyle(Desk.dim)
             Button("Close") { close() }.font(.system(size: 15, weight: .semibold)).foregroundStyle(Desk.accentLight)
         }
@@ -470,7 +470,7 @@ struct SessionView: View {
     private var phase: String {
         switch state {
         case 0: return error == nil ? "Starting…" : "Not started"
-        case 1: return userCode ? (mac.isLinux ? "Linux is running" : "macOS is running") : "Booting"
+        case 1: return userCode ? "\(mac.isMac ? "macOS" : mac.guestName) is running" : "Booting"
         case 3: return "Finishing shutdown…"
         default: return "Stopped (\(String(cString: henge_vm_exit_reason())))"
         }
@@ -490,7 +490,7 @@ struct SessionView: View {
                     Toggle("Color matching", isOn: $matchScreenColors)
                     LabeledContent("Brightness", value: "\(Int(screenBrightness * 100))%")
                     Slider(value: $screenBrightness, in: 0.4...1)
-                    Text("Brightness dims only \(mac.isLinux ? "Linux's" : "the Mac's") screen.")
+                    Text("Brightness dims only \(mac.theGuests) screen.")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
                 Section("Pointer") {
@@ -503,10 +503,30 @@ struct SessionView: View {
                     Toggle("Sharp edges", isOn: $sharpCursor)
                     LabeledContent("Scroll speed", value: String(format: "%.1f×", scrollSpeed))
                     Slider(value: $scrollSpeed, in: 0.1...1.5)
-                    Text("\(mac.isLinux ? "Linux" : "The Mac") supplies a small pointer image. Enlarging it can look blurry; 1× is the sharpest on an iPad. Scroll speed changes apply immediately.")
+                    Text("\(mac.theGuest) supplies a small pointer image. Enlarging it can look blurry; 1× is the sharpest on an iPad. Scroll speed changes apply immediately.")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
-                if !mac.isLinux {
+                if mac.isWindows {
+                Section("Windows Setup") {
+                    Button("Type the Requirements Commands") {
+                        showDetails = false
+                        Task {
+                            try? await Task.sleep(nanoseconds: 600_000_000)
+                            await WindowsSetup.type(WindowsSetup.requirements)
+                        }
+                    }
+                    Button("Type the No Network Command") {
+                        showDetails = false
+                        Task {
+                            try? await Task.sleep(nanoseconds: 600_000_000)
+                            await WindowsSetup.type(WindowsSetup.noNetwork)
+                        }
+                    }
+                    Text("Windows 11's Setup refuses a machine without a TPM and Secure Boot. At Setup's first page (the language), tap the first button: it presses Shift-F10 for a command prompt and types the registry settings that let Setup go on. The second, at the first page after Windows restarts (the country), types oobe\\bypassnro: Windows restarts and then offers \"I don't have internet\", for an account without a Microsoft sign-in.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
+                }
+                if mac.isMac {
                 Section("Sharing") {
                     LabeledContent("Clipboard and folder", value: helperRunning ? "On" : "Not set up")
                     if !helperRunning {
@@ -591,7 +611,7 @@ struct SessionView: View {
         let ram = GuestMemory.prepare(mac)
         HengeLog.log("session", "available memory \(henge_available_memory() >> 20) MB")
         guard ram >= 1024 else {
-            error = "There is not room for this \(mac.isLinux ? "machine" : "Mac")'s memory: it needs a few GB of free storage."
+            error = "There is not room for this \(mac.isMac ? "Mac" : "machine")'s memory: it needs a few GB of free storage."
             return
         }
         var buffer = [CChar](repeating: 0, count: 256)
@@ -606,7 +626,17 @@ struct SessionView: View {
         }
         HengeLog.log("session", "screen \(mac.screen.width)x\(mac.screen.height) retina \(mac.isRetina)")
         let rc: Int32
-        if mac.isLinux {
+        let media = mac.isWindows && FileManager.default.fileExists(atPath: mac.media.path)
+        if mac.isWindows {
+            // UEFI firmware, which starts Windows' boot manager from the disk, or Setup from the disc while the
+            // disk has nothing to start.
+            guard let firmware = WindowsFirmware.path() else {
+                error = WindowsFirmware.missing
+                return
+            }
+            rc = henge_vm_boot_uefi(firmware, mac.vars.path, mac.disk.path, media ? mac.media.path : nil, ram, Int32(cpus),
+                                    &buffer, buffer.count)
+        } else if mac.isLinux {
             // The disk's own boot entry (host/linux_disk.c). Under emulation udev takes minutes over its first
             // pass, longer than systemd's 90 s wait for a disk: that would drop Omarchy into its emergency shell.
             rc = henge_vm_boot_linux(mac.disk.path, ram, Int32(cpus), UInt32(mac.screen.width), UInt32(mac.screen.height),
@@ -671,7 +701,10 @@ struct SessionView: View {
                 lastGPUFrames = gpuFrames
                 JITBootstrap.releaseLingeringDebugger()
             }
-            if tick == 60 && !stillWallpaperTipShown && !mac.isLinux { // about when the desktop is up after a login
+            // A disc started by the firmware asks for a key ("Press any key to boot from CD or DVD") and gives up
+            // after a few seconds. The firmware only gets to the disc when the disk has nothing to start.
+            if media && tick < 40 { Keys.press(28) }
+            if tick == 60 && !stillWallpaperTipShown && mac.isMac { // about when the desktop is up after a login
                 stillWallpaperTipShown = true
                 showWallpaperTip = true
                 DispatchQueue.main.asyncAfter(deadline: .now() + 10) { showWallpaperTip = false }

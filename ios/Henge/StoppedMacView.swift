@@ -4,11 +4,13 @@ import SwiftUI
 struct StoppedMacView: View {
     let outcome: Int32
     let reason: String
-    var linux = false
+    /// "Mac", "Linux" or "Windows".
+    var guest = "Mac"
     var start: (() -> Void)? = nil
     let close: () -> Void
 
-    private var name: String { linux ? "Linux" : "Mac" }
+    private var name: String { guest }
+    private var mac: Bool { guest == "Mac" }
 
     private var title: String {
         switch outcome {
@@ -20,12 +22,12 @@ struct StoppedMacView: View {
     }
 
     private var detail: String {
-        let next = linux ? "You can start this machine again or return to your Linux machines."
-                         : "You can start this Mac again or return to your Macs."
+        let next = mac ? "You can start this Mac again or return to your Macs."
+                       : "You can start this machine again or return to your \(guest) machines."
         switch outcome {
         case Int32(HENGE_VM_OUTCOME_SHUTDOWN.rawValue), Int32(HENGE_VM_OUTCOME_HOST_STOP.rawValue): return next
-        case Int32(HENGE_VM_OUTCOME_RESTART.rawValue): return linux ? "Linux is ready to start again." : "The Mac is ready to start again."
-        default: return "\(linux ? "Linux" : "The Mac") stopped: \(reason). " + next
+        case Int32(HENGE_VM_OUTCOME_RESTART.rawValue): return "\(mac ? "The Mac" : guest) is ready to start again."
+        default: return "\(mac ? "The Mac" : guest) stopped: \(reason). " + next
         }
     }
 
@@ -35,7 +37,7 @@ struct StoppedMacView: View {
             Text(title).font(.headline)
             Text(detail).font(.subheadline).foregroundStyle(.white.opacity(0.7))
                 .multilineTextAlignment(.center)
-            if let start { Button(linux ? "Start Linux" : "Start Mac", action: start).buttonStyle(.borderedProminent) }
+            if let start { Button("Start \(guest)", action: start).buttonStyle(.borderedProminent) }
             Button("Close", action: close).buttonStyle(.bordered)
         }
         .foregroundStyle(.white)

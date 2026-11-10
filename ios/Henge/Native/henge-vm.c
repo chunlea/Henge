@@ -18,6 +18,8 @@
 #include "dns_proxy.h"
 #include "vm.h"
 #include "install.h"
+#include <zlib.h>
+
 #include "linux_disk.h"
 #include "linux_image.h"
 
@@ -127,6 +129,43 @@ int henge_vm_boot_linux(const char *disk, uint64_t ram_mb, int cpus, uint32_t wi
     if (hv_vm_create(&c, err, errlen) != 0) return failed_start();
     if (getenv("HV_STATS")) hv_vm_machine()->stats_interval = atoi(getenv("HV_STATS"));
     return started(err, errlen);
+}
+
+int henge_vm_boot_uefi(const char *firmware, const char *vars, const char *disk, const char *cdrom, uint64_t ram_mb,
+                       int cpus, char *err, size_t errlen) {
+    { extern void hv_prof_ios_start(void); hv_prof_ios_start(); }
+    if (begin_start(err, errlen)) return -1;
+    HengeDualMapping *jit = henge_ios_jit_get_mapping();
+    if (!jit || !jit->rw_addr) {
+        snprintf(err, errlen, "Henge has no JIT region. Turn on JIT first.");
+        return failed_start();
+    }
+    HvVmConfig c = {.disk = disk, .ram_mb = ram_mb, .ncpus = cpus, .log = 1, .uefi_code = firmware, .uefi_vars = vars,
+                    .cdrom = cdrom, .jit_rx = jit->rx_addr, .jit_rw = jit->rw_addr, .jit_bytes = jit->size};
+    fprintf(stderr, "henge: booting UEFI firmware with %d CPUs, %llu MB RAM%s, a %zu MB JIT region\n", cpus,
+            (unsigned long long)ram_mb, cdrom ? ", installation media" : "", jit->size >> 20);
+    if (hv_vm_create(&c, err, errlen) != 0) return failed_start();
+    if (getenv("HV_STATS")) hv_vm_machine()->stats_interval = atoi(getenv("HV_STATS"));
+    return started(err, errlen);
+}
+
+int henge_gunzip(const char *from, const char *to) {
+    gzFile in = gzopen(from, "rb");
+    if (!in) return -1;
+    FILE *out = fopen(to, "wb");
+    if (!out) {
+        gzclose(in);
+        return -1;
+    }
+    static char buf[1 << 16];
+    int n, ok = 1;
+    while ((n = gzread(in, buf, sizeof buf)) > 0)
+        if (fwrite(buf, 1, (size_t)n, out) != (size_t)n) { ok = 0; break; }
+    if (n < 0) ok = 0;
+    gzclose(in);
+    if (fclose(out) != 0) ok = 0;
+    if (!ok) remove(to);
+    return ok ? 0 : -1;
 }
 
 static volatile double unpack_progress;

@@ -13,8 +13,8 @@ struct HomeView: View {
     @State private var chosen: UUID?
 
     /// The Mac on show: the one picked, or the one used last.
-    /// Linux machines have their own tab (LinuxView).
-    private var macs: [VirtualMac] { machines.all.filter { !$0.isLinux } }
+    /// Linux and Windows machines have their own tabs (LinuxView, WindowsView).
+    private var macs: [VirtualMac] { machines.all.filter(\.isMac) }
 
     private var mac: VirtualMac? {
         if let chosen, let mac = macs.first(where: { $0.id == chosen }) { return mac }
