@@ -549,6 +549,18 @@ static os_unfair_lock rctrl_lock = OS_UNFAIR_LOCK_INIT;
 static int rctrl_user, rctrl_click;
 static int left_user, left_click, left_sent; /* only the pointer queue touches these */
 
+/* A UEFI guest's pointer is a tablet (devices/xhci.h), which says where it is: Windows has no driver
+   for virtio's mouse or for the Magic Trackpad. So what the host UI has for the other guests, a mouse's
+   moves and a trackpad's fingers, moves a pointer kept here, and the tablet reports it. */
+static struct {
+    os_unfair_lock lock;
+    double x, y;      /* display pixels */
+    int buttons;      /* bit 0 left, 1 right, 2 middle */
+    int known;
+    struct { int in, x, y; } finger[16];
+    double scroll;    /* two fingers' travel that has not made a wheel notch yet */
+} tab = {.lock = OS_UNFAIR_LOCK_INIT};
+
 static dispatch_queue_t pointer_queue(void) {
     static dispatch_queue_t q;
     static dispatch_once_t once;
@@ -572,6 +584,8 @@ static void stop_pointer(void) {
        discard queued input before releasing the keyboard and mouse. */
     dispatch_sync(pointer_queue(), ^{
         left_user = left_click = left_sent = 0;
+        tab.buttons = 0, tab.known = 0;
+        memset(tab.finger, 0, sizeof tab.finger);
         os_unfair_lock_lock(&rctrl_lock);
         rctrl_user = rctrl_click = 0;
         os_unfair_lock_unlock(&rctrl_lock);
@@ -597,10 +611,71 @@ void hv_vm_key_hid(uint8_t usage, int down) {
     else key_linux(hv_hid_to_linux(usage), down);
 }
 
+static void tab_size(double *w, double *h) {
+    *w = board.fb_width > 1 ? board.fb_width : 800, *h = board.fb_height > 1 ? board.fb_height : 600;
+}
+
+/* With tab.lock held. */
+static void tab_send(double dx, double dy, int wheel_notches) {
+    double w, h;
+    tab_size(&w, &h);
+    if (!tab.known) tab.x = w / 2, tab.y = h / 2, tab.known = 1;
+    tab.x += dx, tab.y += dy;
+    tab.x = tab.x < 0 ? 0 : tab.x > w - 1 ? w - 1 : tab.x;
+    tab.y = tab.y < 0 ? 0 : tab.y > h - 1 ? h - 1 : tab.y;
+    if (!atomic_load(&input_stopping))
+        hv_xhci_pointer(board.usb, (int)(tab.x * 32767 / (w - 1)), (int)(tab.y * 32767 / (h - 1)), tab.buttons, wheel_notches);
+}
+
+static void tab_move(int dx, int dy, int wheel_notches) {
+    os_unfair_lock_lock(&tab.lock);
+    tab_send(dx, dy, wheel_notches);
+    os_unfair_lock_unlock(&tab.lock);
+}
+
+static void tab_button(int button, int down) {
+    os_unfair_lock_lock(&tab.lock);
+    tab.buttons = down ? tab.buttons | 1 << button : tab.buttons & ~(1 << button);
+    tab_send(0, 0, 0);
+    os_unfair_lock_unlock(&tab.lock);
+}
+
+/* A finger on the host's trackpad surface, in the Magic Trackpad's sensor units. One finger moving moves
+   the pointer, a swipe across the pad taking it about one and a half times across the display. Two
+   scroll, the way the content under them would go. */
+static void tab_touch(int id, int phase, int x, int y) {
+    if (id < 0 || id >= 16) return;
+    os_unfair_lock_lock(&tab.lock);
+    int down = 0;
+    for (int i = 0; i < 16; i++) down += tab.finger[i].in;
+    if (phase == 1 && tab.finger[id].in) {
+        double w, h;
+        tab_size(&w, &h);
+        double scale = w * 1.5 / HV_TP_SENSOR_X;
+        int dx = x - tab.finger[id].x, dy = y - tab.finger[id].y;
+        if (down == 1) tab_send(dx * scale, dy * scale, 0);
+        else if (down == 2) {
+            tab.scroll += dy / 2.0; /* each of the two fingers reports its own move */
+            int notches = (int)(tab.scroll / 160);
+            if (notches) {
+                tab.scroll -= notches * 160;
+                tab_send(0, 0, notches);
+            }
+        }
+    }
+    if (phase == 2) tab.finger[id].in = 0, tab.scroll = 0;
+    else tab.finger[id].in = 1, tab.finger[id].x = x, tab.finger[id].y = y;
+    os_unfair_lock_unlock(&tab.lock);
+}
+
 static void move_now(void *ctx) {
     if (atomic_load(&input_stopping)) return;
     int64_t packed = (int64_t)(intptr_t)ctx;
     int32_t dx = (int32_t)(packed >> 32), dy = (int32_t)packed;
+    if (board.fwcfg) {
+        tab_move(dx, dy, 0);
+        return;
+    }
     if (dx) hv_virtio_input_send(board.mouse, HV_EV_REL, HV_REL_X, dx);
     if (dy) hv_virtio_input_send(board.mouse, HV_EV_REL, HV_REL_Y, dy);
     hv_virtio_input_send(board.mouse, HV_EV_SYN, 0, 0);
@@ -623,6 +698,10 @@ static void button_now(void *ctx) {
     if (atomic_load(&input_stopping)) return;
     intptr_t v = (intptr_t)ctx;
     int button = (int)(v >> 1), down = (int)(v & 1);
+    if (board.fwcfg) {
+        tab_button(button, down);
+        return;
+    }
     if (button == 0) {
         left_user = down;
         left_update();
@@ -650,6 +729,10 @@ void hv_vm_mouse_button(int button, int down) {
 
 /* The guest takes a wheel event as 8 bits: -200 arrives as +56, the wrong way. So big moves go in pieces. */
 static void wheel(uint16_t axis, int amount) {
+    if (board.fwcfg) { /* the tablet has one wheel */
+        if (axis == HV_REL_WHEEL) tab_move(0, 0, amount > 127 ? 127 : amount < -127 ? -127 : amount);
+        return;
+    }
     while (amount) {
         int piece = amount > 100 ? 100 : amount < -100 ? -100 : amount;
         hv_virtio_input_send(board.mouse, HV_EV_REL, axis, piece);
@@ -659,13 +742,22 @@ static void wheel(uint16_t axis, int amount) {
 }
 
 void hv_vm_pointer_abs(int x, int y, int buttons, int wheel_notches) {
-    if (!atomic_load(&input_stopping)) hv_xhci_pointer(board.usb, x, y, buttons, wheel_notches);
+    double w, h;
+    os_unfair_lock_lock(&tab.lock);
+    tab_size(&w, &h);
+    tab.x = x * (w - 1) / 32767, tab.y = y * (h - 1) / 32767, tab.buttons = buttons, tab.known = 1;
+    tab_send(0, 0, wheel_notches);
+    os_unfair_lock_unlock(&tab.lock);
 }
 
 void hv_vm_mouse_wheel(int dy) { wheel(HV_REL_WHEEL, dy); }
 void hv_vm_mouse_hwheel(int dx) { wheel(HV_REL_HWHEEL, dx); }
 
 void hv_vm_touch(int id, int phase, int x, int y, uint32_t ts_ms) {
+    if (board.fwcfg) {
+        tab_touch(id, phase, x, y);
+        return;
+    }
     if (x < 0) x = 0;
     if (x > HV_TP_SENSOR_X) x = HV_TP_SENSOR_X;
     if (y < 0) y = 0;
@@ -673,11 +765,23 @@ void hv_vm_touch(int id, int phase, int x, int y, uint32_t ts_ms) {
     hv_xhci_touch(board.usb, id, phase, x, y, ts_ms);
 }
 
-void hv_vm_touch_frame(uint32_t ts_ms) { hv_xhci_touch_frame(board.usb, ts_ms); }
+void hv_vm_touch_frame(uint32_t ts_ms) {
+    if (!board.fwcfg) hv_xhci_touch_frame(board.usb, ts_ms);
+}
 
-void hv_vm_touch_button(int down) { hv_xhci_touch_button(board.usb, down); }
+void hv_vm_touch_button(int down) {
+    if (board.fwcfg) hv_vm_mouse_button(0, down);
+    else hv_xhci_touch_button(board.usb, down);
+}
 
 int hv_vm_pointer(int *x, int *y) {
+    if (board.fwcfg) {
+        os_unfair_lock_lock(&tab.lock);
+        int known = tab.known;
+        *x = (int)tab.x, *y = (int)tab.y;
+        os_unfair_lock_unlock(&tab.lock);
+        return known ? 0 : -1;
+    }
     HvPvgLite *pvg = atomic_load_explicit(&display_pvg, memory_order_acquire);
     const uint8_t *page = pvg ? hv_pvg_lite_display_page(pvg) : NULL;
     if (!page) return -1;
