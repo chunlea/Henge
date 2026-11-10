@@ -49,6 +49,7 @@ typedef struct HvVirtParams {
     const char *vars_path;   /* where the firmware's variables are kept (NULL: nowhere) */
     uint32_t screen_width, screen_height; /* the display's size; 0: the firmware's own choice (800 x 600) */
     const char *gpu_dir;     /* a GPU for a guest with UTM's Direct3D driver: the folder of frameworks (NULL: none) */
+    int no_ramfb;            /* no firmware framebuffer: the GPU is the only display (for a guest with the driver in it) */
 } HvVirtParams;
 
 int hv_virt_create(HvVmapple *b, HvMachine *m, HvCpu *cpus, const HvVirtParams *p);

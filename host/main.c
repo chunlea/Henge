@@ -1029,6 +1029,7 @@ int main(int argc, char **argv) {
     const char *uefi_code = NULL, *uefi_vars = NULL, *cdrom = NULL;
     unsigned screen_w = 0, screen_h = 0;
     const char *uefi_gpu = NULL;
+    int gpu_only = 0;
     uint64_t seed = 0, ecid = 0, ram_mb = 4096, aux_offset = 16384;
     const char *install_ipsw = NULL;
     const char *share_folder = NULL;
@@ -1084,6 +1085,7 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--log")) log = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--trace")) trace = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--screenshot")) screenshot = argv[++i];
+        else if (!strcmp(argv[i], "--gpu-only")) gpu_only = atoi(argv[++i]); /* 1, with --gpu: no firmware framebuffer (the guest has the GPU driver) */
         else if (!strcmp(argv[i], "--gpu")) uefi_gpu = argv[++i]; /* a UEFI guest's GPU: the folder of frameworks (ios/deps/virgl/macos) */
         else if (!strcmp(argv[i], "--screen")) sscanf(argv[++i], "%ux%u", &screen_w, &screen_h); /* WxH: a UEFI guest's display */
         else if (!strcmp(argv[i], "--watch")) watch = strtoull(argv[++i], NULL, 0);
@@ -1114,7 +1116,7 @@ int main(int argc, char **argv) {
                      .installer = install_ipsw != NULL,
                      .linux_kernel = linux_kernel, .linux_initrd = linux_initrd, .linux_cmdline = linux_cmdline,
                      .linux_from_disk = linux_from_disk, .linux_extra = linux_extra,
-                     .uefi_code = uefi_code, .uefi_vars = uefi_vars, .cdrom = cdrom, .uefi_gpu = uefi_gpu};
+                     .uefi_code = uefi_code, .uefi_vars = uefi_vars, .cdrom = cdrom, .uefi_gpu = uefi_gpu, .uefi_gpu_only = gpu_only};
     if (uefi_code && screen_w && screen_h) vc.fb_width = screen_w, vc.fb_height = screen_h;
     if (getenv("HV_JIT_MB")) vc.jit_bytes = (size_t)atoi(getenv("HV_JIT_MB")) << 20; /* debugging: a small region flushes often */
     hv_prof_register = hv_prof_register_thread;

@@ -103,7 +103,9 @@ int hv_virt_create(HvVmapple *b, HvMachine *m, HvCpu *cpus, const HvVirtParams *
     b->uart = hv_pl011_create(m, b->gic, VIRT_UART, 32 + VIRT_IRQ_UART);
     b->rtc = hv_pl031_create(m, b->gic, VIRT_RTC, 32 + VIRT_IRQ_RTC);
     b->fwcfg = hv_fw_cfg_create(m, VIRT_FW_CFG, b->ncpus);
-    hv_fw_cfg_add_file(b->fwcfg, "etc/ramfb", NULL, 28, ramfb_written, b);
+    /* The firmware's framebuffer, unless the guest has a driver for the GPU: Windows would have both as displays,
+       the framebuffer as a second monitor nobody sees. Without it nothing shows until the driver starts. */
+    if (!p->no_ramfb || !p->gpu_dir) hv_fw_cfg_add_file(b->fwcfg, "etc/ramfb", NULL, 28, ramfb_written, b);
     b->screen_width = p->screen_width, b->screen_height = p->screen_height;
     b->fwcfg->dir_selected = ramfb_sizes, b->fwcfg->dir_opaque = b;
     b->pcie = hv_pcie_create(m, b->gic, VIRT_PCIE_ECAM, VIRT_PCIE_ECAM_SIZE, VIRT_PCIE_MMIO, VIRT_PCIE_MMIO_SIZE,

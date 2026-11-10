@@ -698,8 +698,9 @@ struct SessionView: View {
             let disc = media ? mac.media.path : tools ? mac.tools.path : nil
             let gpu = mac.gpu == false ? nil : EngineTuning.windowsGPU
             HengeLog.log("session", "Windows: disc \(disc.map { ($0 as NSString).lastPathComponent } ?? "none"), GPU \(gpu == nil ? "off" : "on")")
+            let gpuOnly = gpu != nil && mac.gpuDriver == true
             rc = henge_vm_boot_uefi(firmware, mac.vars.path, mac.disk.path, disc, ram, Int32(cpus),
-                                    UInt32(mac.screen.width), UInt32(mac.screen.height), gpu, &buffer, buffer.count)
+                                    UInt32(mac.screen.width), UInt32(mac.screen.height), gpu, gpuOnly ? 1 : 0, &buffer, buffer.count)
         } else if mac.isLinux {
             // The disk's own boot entry (host/linux_disk.c). Under emulation udev takes minutes over its first
             // pass, longer than systemd's 90 s wait for a disk: that would drop Omarchy into its emergency shell.
@@ -768,6 +769,12 @@ struct SessionView: View {
             // A disc started by the firmware asks for a key ("Press any key to boot from CD or DVD") and gives up
             // after a few seconds. The firmware only gets to the disc when the disk has nothing to start.
             if media && tick < 40 { Keys.press(28) }
+            if mac.isWindows && tick % 5 == 0 && henge_vm_gpu_driver_active() != 0,
+               var seen = Machines.shared.all.first(where: { $0.id == mac.id }), seen.gpuDriver != true {
+                seen.gpuDriver = true
+                Machines.shared.update(seen)
+                HengeLog.log("session", "Windows' GPU driver has the display: the machine starts with the GPU alone from now on")
+            }
             if tick == 60 && !stillWallpaperTipShown && mac.isMac { // about when the desktop is up after a login
                 stillWallpaperTipShown = true
                 showWallpaperTip = true
