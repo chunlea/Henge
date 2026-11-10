@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "acpi.h"
 #include "fdt.h"
 #include "timer.h"
 
@@ -191,6 +192,8 @@ int hv_uefi_load(HvVmapple *b, const HvUefiBoot *ub, char *err, size_t errlen) {
         if (o) fwrite(dtb, 1, dlen, o), fclose(o);
     }
     free(dtb);
+    /* HV_NO_ACPI: the device tree only, which is all Linux needs. */
+    if (!getenv("HV_NO_ACPI") && hv_acpi_install(b) != 0) return fail(err, errlen, "Cannot build the ACPI tables.");
     hv_virt_reset_cpu(b);
     b->cpu[0].x[0] = VIRT_MEM; /* what QEMU passes; the firmware knows the address anyway */
     return 0;
