@@ -95,10 +95,29 @@ memory when the machine stops.
 Linux starts on this board as well, which is a quick way to check a device: from the
 UEFI shell, `fs0:\path\vmlinuz initrd=\path\initramfs root=... console=ttyAMA0`.
 
+## Where it stands
+
+Windows 11 Pro 24H2 (build 26100) installs from Microsoft's ISO and runs to its desktop
+with four CPUs: Setup, both of its restarts, the first-run pages (with
+`oobe\bypassnro` from Shift+F10, there being no network) and a local account. The
+first stage takes about seven minutes on an M-series Mac, the second about ten.
+
+Two things the NVMe controller had to get right for that: reads and writes are a worker
+thread's (a guest CPU that waits for the host's disk in a DPC is a
+`DPC_WATCHDOG_VIOLATION`), and a completion waits when its queue is full. Windows makes
+eight submission queues of 1024 entries that all complete into one queue of 1024, and
+leaves it to the controller to hold completions back, as the specification says.
+
 ## Not there yet
 
 - The iOS app does not offer Windows. Everything above is the Mac's command-line tool.
 - No network: Windows has no driver for the virtio card.
 - No sound, no display driver (so one resolution, drawn by the CPU), no clipboard or
   shared folder.
-- A restart ends `hengevm`: it has to be started again by hand.
+- A restart ends `hengevm`: it has to be started again (a shell loop does). The
+  firmware then starts Windows Boot Manager from the disk, whose entry Windows wrote to
+  the firmware's variables.
+- Seen once and not explained: an interrupt storm on the NVMe line a third of the way
+  into Setup's second stage, after the fix above. `hengevm` names the interrupt and
+  prints the controller's state when it happens (`hv_nvme_dump`).
+- Seen once under heavy host load: `hengevm` processes that did not exit on SIGTERM.

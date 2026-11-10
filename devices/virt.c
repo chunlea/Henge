@@ -37,6 +37,14 @@ static void ramfb_written(void *opaque) {
     if (b->m->log) fprintf(stderr, "hengevm: ramfb: %ux%u at %llx\n", width, height, (unsigned long long)addr);
 }
 
+/* An interrupt is being taken over and over (devices/gicv3.c): what its device looks like. */
+static void storm(void *opaque, int intid) {
+    HvVmapple *b = opaque;
+    static int said;
+    if (said++ >= 3) return;
+    if (b->nvme && intid == 32 + VIRT_IRQ_PCIE + b->nvme->pci.slot) hv_nvme_dump(b->nvme);
+}
+
 /* EDK2's driver for virtio 1.0 devices takes only those whose PCI subsystem id is 0x40 or more, as the
    specification says of devices that are not transitional. QEMU's have 0x1100; the virtual Mac's keep the
    device type there, which is what macOS has always been shown. */
@@ -60,6 +68,7 @@ int hv_virt_create(HvVmapple *b, HvMachine *m, HvCpu *cpus, const HvVirtParams *
     if (!(b->vars = hv_pflash_create(m, VIRT_FLASH_VARS, VIRT_FLASH_SIZE, p->vars_path))) return -1;
 
     b->gic = hv_gicv3_create(m, VIRT_GIC_DIST, VIRT_GIC_REDIST);
+    b->gic->storm = storm, b->gic->storm_opaque = b;
     b->uart = hv_pl011_create(m, b->gic, VIRT_UART, 32 + VIRT_IRQ_UART);
     b->rtc = hv_pl031_create(m, b->gic, VIRT_RTC, 32 + VIRT_IRQ_RTC);
     b->fwcfg = hv_fw_cfg_create(m, VIRT_FW_CFG, b->ncpus);

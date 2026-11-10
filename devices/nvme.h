@@ -59,7 +59,12 @@ typedef struct HvNvme {
     pthread_cond_t cv, idle_cv;
     pthread_t worker;
     int stopping, worker_started;
+    struct { uint32_t off, val; } trace[32]; /* the last register writes (hv_nvme_dump) */
+    uint32_t ntrace;
 } HvNvme;
+
+/* Debugging: the controller's registers, queues and last register writes, to stderr. */
+void hv_nvme_dump(HvNvme *n);
 
 HvNvme *hv_nvme_create(HvMachine *m, HvPcie *bus, HvDisk *disk);
 /* CPU thread: post the completions of finished commands and raise the interrupt. */

@@ -354,6 +354,7 @@ static uint64_t bar_read(HvPciDev *d, int bar, uint64_t off, unsigned size) {
 static void bar_write(HvPciDev *d, int bar, uint64_t off, uint64_t v, unsigned size) {
     (void)bar;
     HvNvme *n = d->opaque;
+    n->trace[n->ntrace++ % 32].off = (uint32_t)off, n->trace[(n->ntrace - 1) % 32].val = (uint32_t)v;
     if (off >= DOORBELLS) {
         uint32_t i = (uint32_t)(off - DOORBELLS) / 4, qid = i / 2;
         if (qid > HV_NVME_QUEUES || !(n->csts & 1)) return;
@@ -428,6 +429,25 @@ HvNvme *hv_nvme_create(HvMachine *m, HvPcie *bus, HvDisk *disk) {
         return NULL;
     }
     return n;
+}
+
+void hv_nvme_dump(HvNvme *n) {
+    if (!n) return;
+    fprintf(stderr, "hengevm: nvme: cc %x csts %x intms %x intx %d pci command %04x; commands handed %u taken %u posted %u\n", n->cc, n->csts,
+            n->intms, n->pci.intx, n->pci.config[4] | n->pci.config[5] << 8, n->submitted, n->claimed, n->posted);
+    for (int q = 0; q <= HV_NVME_QUEUES; q++) {
+        if (n->cq[q].base) {
+            uint8_t e[16] = {0};
+            hv_phys_read(n->m, n->cq[q].base + (uint64_t)n->cq[q].head * 16, e, 16);
+            fprintf(stderr, "  completion queue %d: %u entries, head %u tail %u phase %d interrupts %d; entry at head: cid %u status %04x\n", q,
+                    n->cq[q].size, n->cq[q].head, n->cq[q].tail, n->cq[q].phase, n->cq[q].ien, e[12] | e[13] << 8, e[14] | e[15] << 8);
+        }
+        if (n->sq[q].base && (q == 0 || n->sq[q].head != n->sq[q].tail))
+            fprintf(stderr, "  submission queue %d: head %u tail %u to completion queue %u\n", q, n->sq[q].head, n->sq[q].tail, n->sq[q].cqid);
+    }
+    fprintf(stderr, "  last register writes:");
+    for (uint32_t i = n->ntrace > 32 ? n->ntrace - 32 : 0; i < n->ntrace; i++) fprintf(stderr, " %x=%x", n->trace[i % 32].off, n->trace[i % 32].val);
+    fprintf(stderr, "\n");
 }
 
 void hv_nvme_stop(HvNvme *n) {

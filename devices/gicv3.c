@@ -134,6 +134,7 @@ static uint64_t acknowledge(HvGic *g, int c, int grp) {
             fprintf(stderr, "hengevm: interrupt storm: INTID %d taken %u times in %llu ms on CPU %d (%s, line %d, latch %d)\n", top,
                     g->acks[top], (unsigned long long)(now - g->acks_since), c, F(g, c, edge, top) ? "edge" : "level",
                     F(g, c, level, top), F(g, c, latch, top));
+        if (now - g->acks_since < 2000 && g->acks[top] > g->nacks / 2 && g->storm) g->storm(g->storm_opaque, top);
         memset(g->acks, 0, sizeof g->acks);
         g->nacks = 0;
         g->acks_since = now;

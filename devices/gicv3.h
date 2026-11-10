@@ -46,6 +46,8 @@ typedef struct HvGic {
     uint32_t acks[HV_GIC_NUM_IRQS];
     uint32_t nacks;
     uint64_t acks_since;
+    void (*storm)(void *opaque, int intid); /* the board's, to say what the device behind the line is doing */
+    void *storm_opaque;
     HvGicCpu cpu[HV_MAX_CPUS];
 } HvGic;
 
