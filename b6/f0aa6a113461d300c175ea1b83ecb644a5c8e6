@@ -1,0 +1,19 @@
+devices/virtio_gpu_virgl.c
+  s_be58c8822e297c::t_4e123d8b0e5915 450,847
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "b6f0aa6a113461d300c175ea1b83ecb644a5c8e6",
+  "prompts": {},
+  "sessions": {
+    "s_be58c8822e297c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "460830a0-c917-44aa-9aea-92d45fd794ef",
+        "model": "unknown"
+      },
+      "human_author": "chunli <git@chunli.dev>"
+    }
+  }
+}
