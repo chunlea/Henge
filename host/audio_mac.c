@@ -17,18 +17,20 @@
 static AudioComponentInstance unit;
 static int unit_running;
 static unsigned cur_channels, cur_format, cur_rate;
+static uint32_t (*pull)(void *src, void *buf, uint32_t len);
+static void *pull_src;
 
 static OSStatus render(void *ref, AudioUnitRenderActionFlags *flags, const AudioTimeStamp *ts, UInt32 bus,
                        UInt32 frames, AudioBufferList *io) {
     (void)flags, (void)ts, (void)bus, (void)frames;
-    HvVirtioSnd *d = ref;
+    (void)ref;
     for (UInt32 i = 0; i < io->mNumberBuffers; i++)
-        hv_virtio_snd_pull(d, io->mBuffers[i].mData, io->mBuffers[i].mDataByteSize);
+        pull(pull_src, io->mBuffers[i].mData, io->mBuffers[i].mDataByteSize);
     return noErr;
 }
 
 static int start(void *opaque, unsigned channels, unsigned format, unsigned rate_hz) {
-    HvVirtioSnd *d = opaque;
+    (void)opaque;
     if (unit && (channels != cur_channels || format != cur_format || rate_hz != cur_rate)) {
         AudioOutputUnitStop(unit);
         AudioUnitUninitialize(unit);
@@ -51,7 +53,7 @@ static int start(void *opaque, unsigned channels, unsigned format, unsigned rate
         f.mFramesPerPacket = 1;
         f.mChannelsPerFrame = channels;
         f.mBitsPerChannel = bytes * 8;
-        AURenderCallbackStruct cb = {render, d};
+        AURenderCallbackStruct cb = {render, NULL};
         if (AudioUnitSetProperty(unit, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Input, 0, &f, sizeof f) != noErr ||
             AudioUnitSetProperty(unit, kAudioUnitProperty_SetRenderCallback, kAudioUnitScope_Input, 0, &cb, sizeof cb) != noErr ||
             AudioUnitInitialize(unit) != noErr) {
@@ -72,8 +74,15 @@ static void stop(void *opaque) {
     unit_running = 0;
 }
 
+static uint32_t pull_virtio(void *src, void *buf, uint32_t len) { return hv_virtio_snd_pull(src, buf, len); }
+
+void hv_audio_attach_pcm(HvVirtioSndBackend *slot, uint32_t (*fn)(void *src, void *buf, uint32_t len), void *src) {
+    pull = fn, pull_src = src;
+    *slot = (HvVirtioSndBackend){start, stop, src};
+}
+
 void hv_audio_attach(HvVirtioSnd *d) {
-    d->backend = (HvVirtioSndBackend){start, stop, d};
+    hv_audio_attach_pcm(&d->backend, pull_virtio, d);
 }
 
 void hv_audio_detach(void) {

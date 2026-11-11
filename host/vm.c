@@ -422,6 +422,7 @@ int hv_vm_create(const HvVmConfig *c, char *err, size_t errlen) {
         else net_on = 1;
     }
     if (board.snd && !c->no_sound) hv_audio_attach(board.snd);
+    if (board.hda && !c->no_sound) hv_audio_attach_pcm(&board.hda->backend, hv_hda_pull, board.hda);
     board.poll = board_poll;
     if (board.vusb && getenv("HV_VUSB_PROBE")) hv_usb_probe_start(board.vusb);
     // The setter and publication share this lock: an older preboot target can
