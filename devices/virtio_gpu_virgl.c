@@ -198,6 +198,8 @@ typedef struct Res {
     uint32_t blob_mem;
     uint64_t blob_size;
     int mapped;              /* its pages are in the shared region, from map_off */
+    uint8_t *data;           /* virglrenderer's mapping of it, while mapped */
+    uint32_t ctx;            /* the context it was made in */
     uint64_t map_off, map_len;
     /* As a scanout (SET_SCANOUT_BLOB): the picture's layout in the blob, and virglrenderer's texture of it. */
     uint32_t sw, sh, sformat, sstride, soffset;
@@ -783,7 +785,7 @@ static uint32_t hostmem_map(HvGpuVirgl *v, Res *r, uint64_t off, uint32_t *map_i
     if (vr.resource_map(r->id, &data, &size) || !data) return RESP_ERR_UNSPEC;
     if (size < len) len = size & ~0xfffull;
     hv_ram_set_pages(g->m, g->hostmem_ram, off >> 12, len >> 12, data);
-    r->mapped = 1, r->map_off = off, r->map_len = len;
+    r->mapped = 1, r->map_off = off, r->map_len = len, r->data = data;
     *map_info = 0;
     if (vr.resource_get_map_info) vr.resource_get_map_info(r->id, map_info);
     return RESP_OK_MAP_INFO;
@@ -791,6 +793,19 @@ static uint32_t hostmem_map(HvGpuVirgl *v, Res *r, uint64_t off, uint32_t *map_i
 
 static void hostmem_unmap(HvGpuVirgl *v, Res *r) {
     if (!r->mapped) return;
+    /* HV_NPT_DUMP=DIR (debugging): what a context's shared blobs hold when they go, the first few of them: its
+       command ring and the replies it was given, to be read against virglrenderer's neptune-protocol. */
+    static int dumped;
+    const char *dir = getenv("HV_NPT_DUMP");
+    if (dir && r->data && r->blob_mem == BLOB_MEM_HOST3D && dumped < 24) {
+        char path[1200];
+        snprintf(path, sizeof path, "%s/npt-%03d-ctx%u-res%u.bin", dir, dumped++, r->ctx, r->id);
+        FILE *f = fopen(path, "wb");
+        if (f) {
+            fwrite(r->data, 1, r->map_len, f);
+            fclose(f);
+        }
+    }
     hv_ram_set_pages(v->g->m, v->g->hostmem_ram, r->map_off >> 12, r->map_len >> 12, NULL); /* and no CPU has them in its TLB */
     vr.resource_unmap(r->id);
     r->mapped = 0;
@@ -1068,7 +1083,7 @@ static uint32_t control(HvGpuVirgl *v, Req *q) {
         if (!c[0] || find(v, c[0])) { type = RESP_ERR_INVALID_RESOURCE_ID; break; }
         Res *r = calloc(1, sizeof *r);
         if (!r) { type = RESP_ERR_OUT_OF_MEMORY; break; }
-        r->id = c[0], r->blob = 1, r->blob_mem = c[1], r->blob_size = size;
+        r->id = c[0], r->blob = 1, r->blob_mem = c[1], r->blob_size = size, r->ctx = h.ctx_id;
         if (c[1] != BLOB_MEM_HOST3D && c[3]) { /* its memory is the guest's: the entries say where */
             if (c[3] > 1u << 20) { free(r); type = RESP_ERR_INVALID_PARAMETER; break; }
             r->iov = calloc(c[3], sizeof *r->iov);
@@ -1275,7 +1290,14 @@ static uint32_t control(HvGpuVirgl *v, Req *q) {
         void *buf = malloc(size ? size : 4);
         if (!buf) { type = RESP_ERR_OUT_OF_MEMORY; break; }
         if (hv_virtq_read(&g->vio, e, 32, buf, size) != size) type = RESP_ERR_INVALID_PARAMETER;
-        else if (vr.submit_cmd(buf, (int)h.ctx_id, (int)(size / 4))) type = RESP_ERR_UNSPEC;
+        else {
+            if (getenv("HV_NPT_DUMP") && size <= 256) { /* the commands a context is sent outside its ring */
+                fprintf(stderr, "gpu3d: submit ctx %u:", h.ctx_id);
+                for (uint32_t i = 0; i < size / 4; i++) fprintf(stderr, " %08x", ((uint32_t *)buf)[i]);
+                fprintf(stderr, "\n");
+            }
+            if (vr.submit_cmd(buf, (int)h.ctx_id, (int)(size / 4))) type = RESP_ERR_UNSPEC;
+        }
         free(buf);
         break;
     }
