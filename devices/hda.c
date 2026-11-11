@@ -13,7 +13,8 @@ enum {
     IN_STREAMS = 4,
     GCAP = 0x4401,           /* four out, four in, 64-bit addresses */
     BCIS = 1 << 2, FIFORDY = 1 << 5,
-    AHEAD_MS = 40,           /* how far ahead of the playing the guest's buffer is read */
+    LEAD_MS = 1,             /* how far ahead of a stream's position its sound is taken */
+    JITTER_MS = 60,          /* the sound kept in the ring between the guest's buffer and the host's output */
     STALL_NS = 150000000,    /* a backend that has taken nothing for this long is not playing */
     NID_ROOT = 0, NID_AFG = 1, NID_DAC = 2, NID_PIN = 3,
     PCM_CAPS = 1 << 17 | 1 << 6 | 1 << 5, /* 16 bits; 48 and 44.1 kHz */
@@ -162,6 +163,16 @@ uint32_t hv_hda_pull(void *opaque, void *buf, uint32_t len) {
     HvHda *d = opaque;
     uint64_t c = atomic_load_explicit(&d->consumed, memory_order_relaxed);
     uint64_t w = atomic_load_explicit(&d->written, memory_order_acquire);
+    atomic_fetch_add_explicit(&d->pulls, 1, memory_order_relaxed);
+    /* Nothing is played until the ring holds its share, and after it has run dry: silence, then whole sound,
+       not crumbs as they come. */
+    if (!atomic_load_explicit(&d->primed, memory_order_relaxed)) {
+        if (w - c < d->prime_bytes) {
+            memset(buf, 0, len);
+            return 0;
+        }
+        atomic_store_explicit(&d->primed, 1, memory_order_relaxed);
+    }
     uint32_t n = w - c < len ? (uint32_t)(w - c) : len;
     for (uint32_t off = 0; off < n;) {
         uint32_t at = (uint32_t)((c + off) % HV_HDA_RING), k = n - off;
@@ -170,40 +181,54 @@ uint32_t hv_hda_pull(void *opaque, void *buf, uint32_t len) {
         off += k;
     }
     memset((uint8_t *)buf + n, 0, len - n);
+    if (n < len) {
+        atomic_store_explicit(&d->primed, 0, memory_order_relaxed);
+        atomic_fetch_add_explicit(&d->underruns, 1, memory_order_relaxed);
+    }
     atomic_store_explicit(&d->consumed, c + n, memory_order_release);
+    { /* HV_HDA_DUMP=file: what the output is given, as it is given (raw PCM), for looking at */
+        static FILE *f;
+        static int on = -1;
+        if (on < 0) on = getenv("HV_HDA_DUMP") && (f = fopen(getenv("HV_HDA_DUMP"), "wb")) != NULL;
+        if (on) fwrite(buf, 1, len, f), fflush(f);
+    }
     return n;
 }
 
-/* Move a stream on by n bytes of its cyclic buffer: to the ring if it is the one heard. */
-static void advance(HvHda *d, HvHdaStream *s, uint32_t n, int heard) {
+/* One step along a stream's buffer list from a cursor (entry, offset): at most n bytes, within the entry.
+   Returns the bytes stepped over, where they are (*pa) and whether the entry ended and asked for an interrupt. */
+static uint32_t bdl_step(HvHda *d, HvHdaStream *s, uint32_t *entry, uint32_t *off, uint32_t n, uint64_t *pa, int *ioc) {
+    uint8_t *e = hv_phys_ptr(d->m, s->bdl + (uint64_t)*entry * 16, 16);
+    *ioc = 0;
+    if (!e) return 0;
+    uint64_t addr;
+    uint32_t len, flags;
+    memcpy(&addr, e, 8), memcpy(&len, e + 8, 4), memcpy(&flags, e + 12, 4);
+    uint32_t k = len > *off ? len - *off : 0;
+    if (k > n) k = n;
+    *pa = addr + *off;
+    *off += k;
+    if (*off >= len) {
+        *ioc = flags & 1;
+        *entry = *entry >= s->lvi ? 0 : *entry + 1;
+        *off = 0;
+        if (!len) return 0;
+    }
+    return k;
+}
+
+/* Move a stream's position on by n bytes: what the guest reads, and its interrupts. */
+static void advance(HvHda *d, HvHdaStream *s, uint32_t n) {
     if (!s->bdl || !s->cbl) return;
     for (int guard = 0; n && guard < 4096; guard++) {
-        uint8_t *e = hv_phys_ptr(d->m, s->bdl + (uint64_t)s->entry * 16, 16);
-        if (!e) return;
-        uint64_t addr;
-        uint32_t len, flags;
-        memcpy(&addr, e, 8), memcpy(&len, e + 8, 4), memcpy(&flags, e + 12, 4);
-        uint32_t k = len > s->entry_off ? len - s->entry_off : 0;
-        if (k > n) k = n;
-        if (k && heard) {
-            uint8_t *p = hv_phys_ptr(d->m, addr + s->entry_off, k);
-            if (p) ring_write(d, p, k);
-            if (p && logging())
-                for (uint32_t j = 0; j + 1 < k; j += 2) {
-                    int16_t v;
-                    memcpy(&v, p + j, 2);
-                    if (abs(v) > d->peak) d->peak = abs(v);
-                }
-        }
-        s->entry_off += k;
+        uint64_t pa;
+        int ioc;
+        uint32_t k = bdl_step(d, s, &s->entry, &s->entry_off, n, &pa, &ioc);
+        if (ioc) s->sts |= BCIS;
+        if (!k && !ioc) break;
         s->lpib += k;
         if (s->lpib >= s->cbl) s->lpib -= s->cbl;
         n -= k;
-        if (s->entry_off >= len) {
-            if (flags & 1) s->sts |= BCIS;
-            s->entry = s->entry >= s->lvi ? 0 : s->entry + 1;
-            s->entry_off = 0;
-        }
     }
     if (d->dp & 1) { /* the position buffer: each stream's position, where a driver may look instead */
         uint64_t pa = (d->dp & ~0x7full) + (uint64_t)(s - d->st) * 8;
@@ -212,6 +237,31 @@ static void advance(HvHda *d, HvHdaStream *s, uint32_t n, int heard) {
             memcpy(p, &s->lpib, 4);
             hv_dma_written(d->m, pa, 4);
         }
+    }
+}
+
+/* Take n bytes of the stream's sound, to the ring if it is heard. The taking has a cursor of its own, LEAD_MS
+   ahead of the position: Windows keeps the buffer full right up to where it reckons the position is by its
+   own clock, which is at times past the one here, and what was taken at the position, or behind it, was now
+   and then the next lap's sound already. */
+static void take(HvHda *d, HvHdaStream *s, uint32_t n, int heard) {
+    if (!s->bdl || !s->cbl) return;
+    n += s->lead_left, s->lead_left = 0;
+    for (int guard = 0; n && guard < 4096; guard++) {
+        uint64_t pa;
+        int ioc;
+        uint32_t k = bdl_step(d, s, &s->take_entry, &s->take_off, n, &pa, &ioc);
+        if (!k && !ioc) break;
+        n -= k;
+        uint8_t *p = k && heard ? hv_phys_ptr(d->m, pa, k) : NULL;
+        if (!p) continue;
+        ring_write(d, p, k);
+        if (logging())
+            for (uint32_t j = 0; j + 1 < k; j += 2) {
+                int16_t v;
+                memcpy(&v, p + j, 2);
+                if (abs(v) > d->peak) d->peak = abs(v);
+            }
     }
 }
 
@@ -228,8 +278,8 @@ static void unhear(HvHda *d, HvHdaStream *s) {
     s->audible = 0;
     s->clock_ns = now_ns();
     if (d->m->log || logging())
-        fprintf(stderr, "hengevm: hda: stream %d is no longer played: %.2f s of sound, %.2f s more dropped, loudest sample %d\n", (int)(s - d->st),
-                (double)(d->played - d->heard_played) / (s->rate * s->frame_bytes), (double)(d->dropped - d->heard_dropped) / (s->rate * s->frame_bytes), d->peak);
+        fprintf(stderr, "hengevm: hda: stream %d is no longer played: %.2f s of sound, %.2f s more dropped, loudest sample %d, the output ran dry %u times\n", (int)(s - d->st),
+                (double)(d->played - d->heard_played) / (s->rate * s->frame_bytes), (double)(d->dropped - d->heard_dropped) / (s->rate * s->frame_bytes), d->peak, (unsigned)atomic_load(&d->underruns));
 }
 
 /* Windows leaves its stream running and turns the codec's converter to it only while there is sound. */
@@ -238,8 +288,10 @@ static void hear(HvHda *d, HvHdaStream *s) {
         if (d->st[j].audible) return;
     /* What was left in the ring is not this stream's. */
     atomic_store(&d->written, atomic_load(&d->consumed));
-    d->seen_consumed = atomic_load(&d->consumed), d->seen_ns = now_ns();
+    d->seen_pulls = atomic_load(&d->pulls), d->seen_ns = s->clock_ns = now_ns();
     d->heard_played = d->played, d->heard_dropped = d->dropped, d->peak = 0;
+    d->prime_bytes = (uint32_t)((uint64_t)s->rate * s->frame_bytes * JITTER_MS / 1000);
+    atomic_store(&d->primed, 0), atomic_store(&d->underruns, 0);
     d->backend_on = d->backend.start && d->backend.start(d->backend.opaque, (s->fmt & 0xf) + 1, HV_VSND_FMT_S16, s->rate) == 0;
     s->audible = 1;
     if (d->m->log || logging())
@@ -260,7 +312,8 @@ static void stream_start(HvHda *d, HvHdaStream *s) {
     static const unsigned bytes[8] = {1, 2, 4, 4, 4, 2, 2, 2};
     s->rate = base * mult / div;
     s->frame_bytes = bytes[bits] * channels;
-    s->entry = s->entry_off = 0;
+    s->entry = s->entry_off = s->take_entry = s->take_off = 0;
+    s->lead_left = (uint32_t)((uint64_t)s->rate * LEAD_MS / 1000) * s->frame_bytes;
     s->lpib = 0;
     s->running = 1;
     s->sts |= FIFORDY;
@@ -281,8 +334,13 @@ static void stream_ctl(HvHda *d, HvHdaStream *s) {
     else if (!run && s->running) stream_stop(d, s);
 }
 
-void hv_hda_poll(HvHda *d) {
-    if (!d) return;
+/* The guest's buffer is short (Windows makes it 20 ms) and Windows fills it by its own clock, not by the position
+   it could read: so the stream moves as a sound card's does, at its rate by the clock exactly, a little at a
+   time. Read in the lumps the host's output asks for (21 ms at a time on an iPad), or at a rate bent half a
+   percent to suit the output, it gave last lap's sound or the next one's: a robot's voice. The ring between
+   this and the output holds JITTER_MS of sound to cover both sides' lumps. */
+int hv_hda_poll(HvHda *d) {
+    if (!d) return 0;
     uint64_t now = 0;
     int any = 0;
     for (int i = 0; i < HV_HDA_STREAMS; i++) {
@@ -291,41 +349,36 @@ void hv_hda_poll(HvHda *d) {
         if (!now) now = now_ns();
         any = 1;
         uint64_t per_s = (uint64_t)s->rate * s->frame_bytes;
-        int by_clock = 1;
         if (heard(d, s) && !s->audible) hear(d, s);
         else if (!heard(d, s)) unhear(d, s);
+        int play = 0;
+        uint64_t fill = 0;
         if (s->audible && d->backend_on) {
-            uint64_t c = atomic_load_explicit(&d->consumed, memory_order_acquire);
-            uint64_t w = atomic_load_explicit(&d->written, memory_order_relaxed);
-            if (c != d->seen_consumed) {
-                if (now - d->seen_ns > STALL_NS) s->clock_ns = now; /* it is playing again */
-                d->seen_consumed = c, d->seen_ns = now;
-            }
-            if (now - d->seen_ns <= STALL_NS) {
-                uint64_t want = c + per_s * AHEAD_MS / 1000;
-                if (want > w) {
-                    uint32_t n = (uint32_t)(want - w);
-                    n -= n % s->frame_bytes;
-                    advance(d, s, n, 1);
-                    d->played += n;
-                }
-                s->clock_ns = now;
-                by_clock = 0;
-            }
+            uint64_t pulls = atomic_load_explicit(&d->pulls, memory_order_relaxed);
+            if (pulls != d->seen_pulls) d->seen_pulls = pulls, d->seen_ns = now;
+            play = now - d->seen_ns <= STALL_NS; /* the output is asking */
+            fill = atomic_load_explicit(&d->written, memory_order_relaxed) - atomic_load_explicit(&d->consumed, memory_order_acquire);
         }
-        if (by_clock) {
-            uint64_t n = (now - s->clock_ns) * per_s / 1000000000ull;
-            n -= n % s->frame_bytes;
-            if (n > per_s / 4) n = per_s / 4 - per_s / 4 % s->frame_bytes; /* after a long pause: not all at once */
-            if (n) {
-                advance(d, s, (uint32_t)n, 0);
-                s->clock_ns += n * 1000000000ull / per_s;
-                if (now - s->clock_ns > 250000000ull) s->clock_ns = now;
-                d->dropped += n;
-            }
-        }
+        uint64_t elapsed = now - s->clock_ns;
+        if (elapsed > 250000000ull) elapsed = 250000000ull, s->clock_ns = now - elapsed; /* after a long pause: not all at once */
+        uint64_t n = elapsed * per_s / 1000000000ull;
+        n -= n % s->frame_bytes;
+        if (!n) continue;
+        uint64_t target = per_s * JITTER_MS / 1000;
+        s->clock_ns += n * 1000000000ull / per_s;
+        /* The output's clock is not this one. Slower, and the ring fills: past 30 ms over its share, sound is
+           left out until it is back (a click every few minutes at worst). Faster, and it runs dry and waits
+           for its share again (hv_hda_pull). */
+        if (play && fill > target + per_s * 30 / 1000) d->shedding = 1;
+        if (d->shedding && fill <= target) d->shedding = 0;
+        if (play && (d->shedding || fill + n > HV_HDA_RING - 4096)) play = 0;
+        advance(d, s, (uint32_t)n);
+        take(d, s, (uint32_t)n, play);
+        if (play) d->played += n;
+        else d->dropped += n;
     }
     if (any) update_irq(d);
+    return any;
 }
 
 /* ---- registers ---- */

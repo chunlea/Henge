@@ -16,6 +16,8 @@
 #include <time.h>
 
 #include "timer.h"
+#include <mach/mach_time.h>
+
 #include "virt.h"
 
 #define ROM_SIZE 0x00100000ull
@@ -233,7 +235,10 @@ static uint64_t tick_locked(HvMachine *m, HvCpu *cpu) {
     hv_virtio_balloon_poll(b->balloon);
     hv_virtio_gpu_poll(b->gpu);
     hv_nvme_poll(b->nvme);
-    hv_hda_poll(b->hda);
+    if (hv_hda_poll(b->hda)) { /* sound is playing: back within a millisecond (24000 ticks of the 24 MHz counter) */
+        uint64_t soon = mach_absolute_time() + 24000;
+        if (!deadline || deadline > soon) deadline = soon;
+    }
     hv_bdif_poll(b->bdif);
     return deadline; /* every GIC state change already updated the CPU's lines */
 }
