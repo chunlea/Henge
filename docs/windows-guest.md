@@ -103,6 +103,12 @@ Direct3D 11 on Metal, in its render server: a process of its own on a Mac (UTM's
 again without its sandbox by `ios/scripts/fetch_virgl.sh`), a thread on iOS. `dwm.exe` then composes
 the desktop on the host's GPU, and Direct3D 11 programs draw with it.
 
+On iOS dxmt is held to feature level 11_0 (`DXMT_CONFIG=d3d11.maxFeatureLevel=11_0`, set by the device). Its
+iOS build has no logic operations in the output merger, which 11_1 requires: offered an 11_1 device without
+them, `dwm.exe` made its device, asked (`CheckFeatureSupport`), and threw it away, again and again, and the
+screen flashed. `HV_NPT_DUMP=DIR` is how that was found: it keeps each context's command ring and replies,
+which decode against virglrenderer's `src/neptune/neptune-protocol` headers.
+
 What the device (`devices/virtio_gpu_virgl.c`, `hv_virtio_gpu_create_d3d`) has for that, beside what Linux's
 OpenGL uses: blob resources, contexts made for a protocol, fences on a context's own timelines, an EDID, and
 a host-visible shared memory region (a 64-bit BAR in a second PCI window above RAM, `VIRT_PCIE_MMIO64`)

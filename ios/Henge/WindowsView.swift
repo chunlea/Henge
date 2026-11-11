@@ -481,7 +481,7 @@ struct WindowsSettingsView: View {
 
                 DeskHeading("GPU")
                 VStack(alignment: .leading, spacing: 10) {
-                    Toggle("GPU (experimental)", isOn: Binding(get: { machine.gpu == true }, set: {
+                    Toggle("GPU", isOn: Binding(get: { machine.gpu != false }, set: {
                         machine.gpu = $0
                         if !$0 { machine.gpuDriver = nil } // back to the firmware's screen, should the driver be at fault
                         machines.update(machine)
@@ -491,7 +491,7 @@ struct WindowsSettingsView: View {
                          ? "This build of Henge has no GPU frameworks for Windows (ios/scripts/fetch_virgl.sh)."
                          : machine.gpuDriver == true
                          ? "Windows has the driver: the GPU is its only screen, and nothing shows while it starts, until the driver does. The size that fits this session is offered to Windows as it changes: choose it in Windows' Settings, System, Display. If the screen stays black, turn this off and on again: Windows starts on the firmware's screen once more."
-                         : "Windows uses it once UTM's Direct3D 11 driver is installed in it. It works with hengevm on a Mac; on an iPad or iPhone Windows' compositor does not keep the GPU yet, and the screen flashes as it tries again and again: leave this off there for now. With it off Windows draws with the emulated CPUs.")
+                         : "Windows uses it once UTM's Direct3D 11 driver is installed in it (experimental: some of Windows' own interface is drawn with pieces missing). Until then, and with this off, Windows draws with the emulated CPUs.")
                         .font(.system(size: 13)).foregroundStyle(Desk.dim)
                     if FileManager.default.fileExists(atPath: machine.tools.path) {
                         Text("The driver disc is in the machine's drive (D: in Windows, when there is no installation disc). The session's Details type the command that installs the driver.")
