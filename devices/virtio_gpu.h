@@ -27,6 +27,7 @@ typedef struct HvVirtioGpu {
     /* The cursor (the cursor queue): a 64x64 image, where it is, and its hot spot. */
     uint32_t cursor[64 * 64];
     int cursor_on;
+    uint64_t cursor_gen;       /* bumped when the cursor's image (or whether there is one) changes */
     int32_t cursor_x, cursor_y, hot_x, hot_y;
     HvGpuVirgl *virgl;         /* 3D (virglrenderer), or NULL: 2D only */
 } HvVirtioGpu;

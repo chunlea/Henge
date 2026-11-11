@@ -82,16 +82,64 @@ enum Device {
     static let chipTooOldText = "macOS won't run on this \(name). Henge needs an A14 or M1 chip or newer."
 }
 
+/// Which key of a hardware keyboard is Super in a Linux guest. iPadOS keeps some ⌘ chords for itself
+/// (⌘-Space, ⌘-Tab, ⌘-H) and no public API hands them to an app, so a Linux desktop that lives on Super
+/// (Hyprland) can be given another key. The key chosen and ⌘ change places; a Mac is never affected.
+enum LinuxSuperKey: String, CaseIterable, Identifiable {
+    case command, option, control
+
+    static let key = "henge.linux.superKey"
+    /// ⌥-Space sends Super-Space while ⌘ is Super. On unless turned off.
+    static let optionSpaceKey = "henge.linux.optionSpaceIsSuper"
+
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .command: return "Command ⌘"
+        case .option: return "Option ⌥"
+        case .control: return "Control ⌃"
+        }
+    }
+
+    /// The HID usage the guest gets for a modifier: left and right swap with their own side's ⌘.
+    func guestUsage(_ usage: UInt8) -> UInt8 {
+        let pairs: [UInt8: UInt8]
+        switch self {
+        case .command: return usage
+        case .option: pairs = [0xe2: 0xe3, 0xe3: 0xe2, 0xe6: 0xe7, 0xe7: 0xe6]
+        case .control: pairs = [0xe0: 0xe3, 0xe3: 0xe0, 0xe4: 0xe7, 0xe7: 0xe4]
+        }
+        return pairs[usage] ?? usage
+    }
+}
+
 /// A keyboard attached to the device. iOS reports each key going down and coming up by its HID usage,
 /// which is what the Mac's USB keyboard sends, so every key and modifier goes straight across.
 enum HardwareKeys {
-    private static var held: Set<UInt8> = []
+    /// The keys that are down, and what the guest was told each one is: a Linux guest can get another
+    /// usage than the key's own, and the release must name the same one.
+    private static var held: [UInt8: UInt8] = [:]
     private static var lastKey: CFTimeInterval = 0
+    private static var linux = false
+    private static var superKey = LinuxSuperKey.command
+    private static var optionSpace = true
+    private static var rawKeyboardObserver: NSObjectProtocol?
+    private static var rawSpacesLogged = 0
+
+    /// Called as a session opens: a Linux guest's keys follow the settings, a Mac's go across as they are.
+    static func start(linux: Bool) {
+        let defaults = UserDefaults.standard
+        self.linux = linux
+        superKey = linux ? defaults.string(forKey: LinuxSuperKey.key).flatMap(LinuxSuperKey.init) ?? .command : .command
+        optionSpace = defaults.object(forKey: LinuxSuperKey.optionSpaceKey) == nil || defaults.bool(forKey: LinuxSuperKey.optionSpaceKey)
+        if linux { HengeLog.log("input", "Linux keyboard: Super is \(superKey.rawValue), option-space as Super-space \(optionSpace ? "on" : "off")") }
+        watchRawKeyboard()
+    }
 
     /// With the on-screen keyboard's view holding the keyboard, iOS may also offer a hardware key as
     /// text, and again as it repeats. The Mac has the key already, and repeats it itself.
     static var keyJustPressed: Bool {
-        held.contains { $0 < 0xe0 } || CACurrentMediaTime() - lastKey < 0.1
+        held.keys.contains { $0 < 0xe0 } || CACurrentMediaTime() - lastKey < 0.1
     }
 
     /// Sends the presses that are keys, and returns the rest.
@@ -113,21 +161,35 @@ enum HardwareKeys {
                 continue
             }
             let usage = UInt8(raw)
-            henge_vm_key_hid(usage, down ? 1 : 0)
             if usage < 0xe0 { lastKey = CACurrentMediaTime() }
             if down {
-                held.insert(usage)
+                if usage == 0x2c { lendOptionAsSuper() }
+                let sent = superKey.guestUsage(usage)
+                henge_vm_key_hid(sent, 1)
+                held[usage] = sent
             } else {
-                held.remove(usage)
+                henge_vm_key_hid(held.removeValue(forKey: usage) ?? superKey.guestUsage(usage), 0)
                 if usage < 0xe0 { StickyKeys.shared.releaseAll() } // one key after a tap on ⌃, ⌥ or ⌘
             }
         }
         return rest
     }
 
+    /// iPadOS never gives an app ⌘-Space, and Super-Space is a Linux desktop's launcher (Omarchy's). So in a
+    /// Linux guest where ⌘ is Super, Space with ⌥ held and no ⌘ is Super-Space: one held ⌥ turns into Super
+    /// and stays Super until it is let go. With both ⌥ keys held the other is still Alt, which makes
+    /// Super-Alt-Space (Omarchy's menu). The guest sees the Alt come up first, with nothing typed under it.
+    private static func lendOptionAsSuper() {
+        guard linux, optionSpace, superKey == .command, held[0xe3] == nil, held[0xe7] == nil,
+              let option = [UInt8(0xe6), 0xe2].first(where: { held[$0] == $0 }) else { return }
+        henge_vm_key_hid(option, 0)
+        henge_vm_key_hid(option + 1, 1) // the Super on the same side
+        held[option] = option + 1
+    }
+
     /// A key that came as a key command rather than as presses: down and up, unless its presses came too.
     static func tap(_ usage: UInt8) {
-        guard !held.contains(usage) else { return }
+        guard held[usage] == nil else { return }
         henge_vm_key_hid(usage, 1)
         henge_vm_key_hid(usage, 0)
         lastKey = CACurrentMediaTime()
@@ -136,8 +198,32 @@ enum HardwareKeys {
     /// iPadOS can keep a key's release when it takes over, as it does for ⌘-Tab: the Mac must not
     /// go on thinking the key is down.
     static func releaseAll() {
-        for usage in held { henge_vm_key_hid(usage, 0) }
+        for sent in held.values { henge_vm_key_hid(sent, 0) }
         held.removeAll()
+    }
+
+    /// Only a note in the log, to learn what an app can see of a chord iPadOS takes: GameController reads
+    /// the keyboard by another road than UIKit's presses. The first few Spaces under ⌘ say whether each
+    /// road saw them. Nothing is sent to the guest from here.
+    private static func watchRawKeyboard() {
+        rawSpacesLogged = 0
+        GCKeyboard.coalesced.map(watch)
+        guard rawKeyboardObserver == nil else { return }
+        rawKeyboardObserver = NotificationCenter.default.addObserver(forName: .GCKeyboardDidConnect, object: nil, queue: .main) { note in
+            if let keyboard = note.object as? GCKeyboard { watch(keyboard) }
+        }
+    }
+
+    private static func watch(_ keyboard: GCKeyboard) {
+        keyboard.keyboardInput?.keyChangedHandler = { input, _, code, pressed in
+            guard code == .spacebar, pressed, rawSpacesLogged < 8,
+                  input.button(forKeyCode: .leftGUI)?.isPressed == true || input.button(forKeyCode: .rightGUI)?.isPressed == true else { return }
+            rawSpacesLogged += 1
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                let command = held[0xe3] != nil || held[0xe7] != nil
+                HengeLog.log("input", "command-space on the raw keyboard; presses gave space: \(CACurrentMediaTime() - lastKey < 0.3 ? "yes" : "no"), command: \(command ? "yes" : "no")")
+            }
+        }
     }
 }
 

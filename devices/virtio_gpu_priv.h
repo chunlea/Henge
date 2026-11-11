@@ -55,7 +55,7 @@ typedef struct Hdr {
 } Hdr;
 _Static_assert(sizeof(Hdr) == 24, "virtio_gpu_ctrl_hdr");
 
-typedef struct Rect { uint32_t x, y, w, h; } Rect;
+typedef struct GpuRect { uint32_t x, y, w, h; } GpuRect;
 
 /* One pixel of the resource's format as the display's B8G8R8X8. */
 static inline uint32_t to_display(uint32_t format, uint32_t p) {

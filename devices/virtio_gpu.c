@@ -47,7 +47,7 @@ static int read_backing(HvVirtioGpu *g, HvGpuResource *r, uint64_t off, uint8_t 
 }
 
 static uint32_t cmd_transfer(HvVirtioGpu *g, const uint8_t *req) {
-    Rect r;
+    GpuRect r;
     uint64_t offset;
     uint32_t id;
     memcpy(&r, req + 24, 16);
@@ -69,7 +69,7 @@ static uint32_t cmd_transfer(HvVirtioGpu *g, const uint8_t *req) {
 }
 
 static uint32_t cmd_flush(HvVirtioGpu *g, const uint8_t *req) {
-    Rect r;
+    GpuRect r;
     uint32_t id;
     memcpy(&r, req + 24, 16);
     memcpy(&id, req + 40, 4);
@@ -197,6 +197,7 @@ static void cursor(HvVirtioGpu *g, const HvVirtqElem *e) {
     g->changes++;
     if (h.type != CMD_UPDATE_CURSOR) return;
     HvGpuResource *r = id ? find(g, id) : NULL;
+    g->cursor_gen++;
     g->cursor_on = r != NULL;
     if (!r) return;
     g->hot_x = (int32_t)hot[0], g->hot_y = (int32_t)hot[1];
@@ -269,7 +270,7 @@ void hv_virtio_gpu_poll(HvVirtioGpu *g) {
 
 void hv_virtio_gpu_compose(HvVirtioGpu *g, uint32_t *out) {
     size_t n = (size_t)g->width * g->height;
-    memcpy(out, g->display, n * 4);
+    if (!hv_gpu_virgl_read(g->virgl, out, g->width, g->height)) memcpy(out, g->display, n * 4);
     if (!g->cursor_on || !g->scanout_res) return;
     int32_t x0 = g->cursor_x - g->hot_x, y0 = g->cursor_y - g->hot_y;
     for (int y = 0; y < 64; y++) {

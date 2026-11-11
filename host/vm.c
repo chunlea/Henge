@@ -23,6 +23,7 @@
 #include "net_slirp.h"
 #include "linux_boot.h"
 #include "uefi_boot.h"
+#include "../devices/virtio_gpu_virgl.h"
 
 static HvMachine m;
 static HvCpu cpus[HV_MAX_CPUS]; /* the board takes them as an array */
@@ -273,6 +274,18 @@ void hv_vm_set_display_layer(void *layer) {
     if (previous) CFRelease(previous);
 }
 
+struct __IOSurface *hv_vm_linux_surface(void) { return board.gpu ? hv_gpu_virgl_surface(board.gpu->virgl) : NULL; }
+
+int hv_vm_linux_cursor(HvLinuxCursor *c) {
+    HvVirtioGpu *g = board.gpu;
+    if (!g) return -1;
+    c->on = g->cursor_on && g->scanout_res;
+    c->x = g->cursor_x, c->y = g->cursor_y, c->hot_x = g->hot_x, c->hot_y = g->hot_y;
+    c->gen = g->cursor_gen;
+    c->pixels = g->cursor;
+    return 0;
+}
+
 uint64_t hv_vm_display_changes(void) { return board.gpu ? board.gpu->changes + 1 : 0; }
 
 uint64_t hv_vm_gpu_frames(void) {
@@ -316,6 +329,14 @@ int hv_vm_create(const HvVmConfig *c, char *err, size_t errlen) {
     int r = c->jit_rx ? hv_machine_init_jit(&m, c->jit_rx, c->jit_rw, jit) : hv_machine_init(&m, jit);
     if (r != 0) return fail(err, errlen, "Cannot set up the JIT region.");
     m.log = c->log;
+    /* Linux: accesses through one base register in a block share a TLB lookup (HV_GROUPS), and a loop's branch back
+       tests for a request to leave before it rather than in its exit (HV_HOIST_CHECK). Measured on Python and
+       Chromium's JavaScript, by the host instructions the same guest work took: 13% and 10% fewer with both. Left
+       off for macOS, where grouping was measured no faster and makes the code about 15% bigger. */
+    if (linux_guest) {
+        if (!getenv("HV_GROUPS")) hv_knob[HV_K_GROUPS] = 1;
+        if (!getenv("HV_HOIST_CHECK")) hv_knob[HV_K_HOIST] = 1;
+    }
     m.gen_checks = getenv("HV_JIT_POISON") != NULL;
     if (getenv("HV_SLOW_MEM")) m.slow_mem = 1; /* debugging: every load and store through the helper */
     ncpus = c->ncpus < 1 ? 1 : c->ncpus > HV_MAX_CPUS ? HV_MAX_CPUS : c->ncpus;
@@ -802,6 +823,8 @@ int hv_vm_pointer(int *x, int *y) {
 int hv_vm_snapshot(uint8_t *bgra, int width, int height) {
     if (board.fb_size && !board.fwcfg && width > 0 && height > 0) { /* Linux: its framebuffer, scaled (nearest) */
         const uint32_t *src = (const uint32_t *)(const void *)(board.ram + (board.fb_base - board.mem_base));
+        HvBootDisplay d; /* virtio-gpu's picture, wherever it is kept, with the pointer on it */
+        if (board.gpu && hv_vm_boot_display(&d) == 0) src = (const uint32_t *)(const void *)d.pixels;
         uint32_t *dst = (uint32_t *)(void *)bgra;
         for (int y = 0; y < height; y++) {
             const uint32_t *row = src + (uint64_t)((uint64_t)y * board.fb_height / (uint64_t)height) * board.fb_width;
