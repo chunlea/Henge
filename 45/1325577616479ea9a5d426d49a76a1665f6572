@@ -1,0 +1,27 @@
+devices/virtio_gpu_virgl.c
+  s_be58c8822e297c::t_d0a1df6a9ce847 455-460
+docs/windows-guest.md
+  s_be58c8822e297c::t_3b61bd2749c85f 106-111
+ios/Henge/Machines.swift
+  s_be58c8822e297c::t_3b39dc94eefd0c 47
+ios/Henge/SessionView.swift
+  s_be58c8822e297c::t_8831f7699fad63 707
+ios/Henge/WindowsView.swift
+  s_be58c8822e297c::t_e1520d8cad52e5 484,494
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "451325577616479ea9a5d426d49a76a1665f6572",
+  "prompts": {},
+  "sessions": {
+    "s_be58c8822e297c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "460830a0-c917-44aa-9aea-92d45fd794ef",
+        "model": "unknown"
+      },
+      "human_author": "chunli <git@chunli.dev>"
+    }
+  }
+}
