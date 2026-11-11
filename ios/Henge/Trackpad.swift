@@ -218,3 +218,87 @@ struct MouseButton: View {
             .accessibilityLabel(title)
     }
 }
+/// A Windows machine's touch screen, laid over its picture: the engine presents it on the machine's USB bus as a
+/// multi-touch screen, so Windows sees the fingers where they are (five at most) and its own touch gestures
+/// work: a tap, press and hold for the right button's menu, a drag to scroll, two fingers to zoom.
+/// Only fingers count: a real trackpad or mouse goes through HardwareMouse.
+struct TouchScreen: UIViewRepresentable {
+    func makeUIView(context: Context) -> Surface { Surface() }
+    func updateUIView(_ view: Surface, context: Context) {}
+
+    final class Surface: UIView, UIPointerInteractionDelegate {
+        private var fingers: [(touch: UITouch, id: Int32)] = []
+        private var freeIds = Set<Int32>(0...4)
+        private var started = Date()
+        private var mostFingers = 0
+        private var travelled: CGFloat = 0
+
+        override init(frame: CGRect) {
+            super.init(frame: frame)
+            isMultipleTouchEnabled = true
+            backgroundColor = .clear
+            addInteraction(UIPointerInteraction(delegate: self))
+        }
+
+        required init?(coder: NSCoder) { fatalError("made in code") }
+
+        func pointerInteraction(_ interaction: UIPointerInteraction, styleFor region: UIPointerRegion) -> UIPointerStyle? { .hidden() }
+
+        /// Where the finger is on the guest's picture: 0..32767 each way.
+        private func place(_ t: UITouch) -> (Int32, Int32) {
+            let p = t.location(in: self)
+            let x = Double(p.x) / max(Double(bounds.width), 1), y = Double(p.y) / max(Double(bounds.height), 1)
+            return (Int32(min(max(x, 0), 1) * 32767), Int32(min(max(y, 0), 1) * 32767))
+        }
+
+        private static func ms(_ t: TimeInterval) -> UInt32 { UInt32(truncatingIfNeeded: Int(t * 1000)) }
+
+        override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+            if fingers.isEmpty { started = Date(); mostFingers = 0; travelled = 0 }
+            var any = false
+            for t in touches where t.type != .indirectPointer {
+                guard let id = freeIds.min() else { break }
+                freeIds.remove(id)
+                fingers.append((t, id))
+                let (x, y) = place(t)
+                henge_vm_screen_touch(id, 1, x, y)
+                any = true
+            }
+            mostFingers = max(mostFingers, fingers.count)
+            if any { henge_vm_screen_frame(Self.ms(event?.timestamp ?? 0)) }
+        }
+
+        override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
+            var any = false
+            for t in touches where t.type != .indirectPointer {
+                guard let finger = fingers.first(where: { $0.touch == t }) else { continue }
+                let now = t.location(in: self), before = t.previousLocation(in: self)
+                travelled += abs(now.x - before.x) + abs(now.y - before.y)
+                let (x, y) = place(t)
+                henge_vm_screen_touch(finger.id, 1, x, y)
+                any = true
+            }
+            if any { henge_vm_screen_frame(Self.ms(event?.timestamp ?? 0)) }
+        }
+
+        override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) { lift(touches, event) }
+        override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) { lift(touches, event) }
+
+        private func lift(_ touches: Set<UITouch>, _ event: UIEvent?) {
+            var any = false
+            fingers.removeAll { finger in
+                guard touches.contains(finger.touch) else { return false }
+                freeIds.insert(finger.id)
+                henge_vm_screen_touch(finger.id, 0, 0, 0)
+                any = true
+                return true
+            }
+            if any { henge_vm_screen_frame(Self.ms(event?.timestamp ?? 0)) }
+            /* Four fingers tapped together show the session's hidden controls, as on the trackpad. */
+            if fingers.isEmpty, mostFingers >= 4, travelled < 24, Date().timeIntervalSince(started) < 0.6 {
+                NotificationCenter.default.post(name: Trackpad.revealTap, object: nil)
+            }
+            if fingers.isEmpty { StickyKeys.shared.releaseAll() }
+        }
+    }
+}

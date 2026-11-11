@@ -92,9 +92,16 @@ struct SessionView: View {
                     }
                     .position(x: layout.screen.midX, y: layout.screen.midY)
                 if state != 2 {
-                    Trackpad()
-                        .frame(width: layout.touch.width, height: layout.touch.height)
-                        .position(x: layout.touch.midX, y: layout.touch.midY)
+                    if mac.isWindows && mac.touchAsTrackpad != true && !display.isExternal {
+                        // Windows takes the fingers on its picture as a touch screen's: where they are.
+                        TouchScreen()
+                            .frame(width: layout.screen.width, height: layout.screen.height)
+                            .position(x: layout.screen.midX, y: layout.screen.midY)
+                    } else {
+                        Trackpad()
+                            .frame(width: layout.touch.width, height: layout.touch.height)
+                            .position(x: layout.touch.midX, y: layout.touch.midY)
+                    }
                     if inputMode == .volumeButtons && volumeMode == .intercept {
                         // The capture interaction must live in the SwiftUI hierarchy to receive
                         // the volume-button events; it passes touches through to the trackpad.

@@ -103,6 +103,13 @@ Direct3D 11 on Metal, in its render server: a process of its own on a Mac (UTM's
 again without its sandbox by `ios/scripts/fetch_virgl.sh`), a thread on iOS. `dwm.exe` then composes
 the desktop on the host's GPU, and Direct3D 11 programs draw with it.
 
+Touch is a USB touch screen beside the tablet (`HV_USB_SCREEN` in `devices/xhci.c`): a HID digitizer of five
+fingers (tip switch, contact number, X and Y across the display, contact count, scan time, and the feature
+report for the most contacts), which Windows takes with what it comes with. The iOS app lays a surface over
+the machine's picture (`TouchScreen`, in Trackpad.swift) and reports each finger where it is; a machine's
+settings can make the picture a trackpad's surface instead. `finger ID 1|0 X Y` in hengevm's input file (X, Y
+in thousandths of the display) is a finger for testing. `HV_NO_TOUCHSCREEN` leaves the device out.
+
 Sound is an Intel HD Audio controller (`devices/hda.c`: ICH6's IDs as QEMU's intel-hda, one codec with a
 stereo output, 16 bits at 44.1 or 48 kHz), which Windows drives with what it comes with (hdaudbus and the HD
 Audio class driver). Windows makes the stream's buffer 20 ms and keeps it full by its own clock, so the

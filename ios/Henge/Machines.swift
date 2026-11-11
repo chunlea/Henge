@@ -49,6 +49,9 @@ struct VirtualMac: Identifiable, Codable, Hashable {
     /// Windows has the GPU's driver: seen taking the display in a session. The machine then starts with the GPU as
     /// its only display (the firmware's framebuffer would be a second monitor to Windows).
     var gpuDriver: Bool?
+    /// A Windows machine's picture takes fingers as a touch screen (TouchScreen) unless this is true: then it is a
+    /// trackpad's surface, as a Mac's is (one finger moves the pointer).
+    var touchAsTrackpad: Bool?
 }
 
 /// How much RAM a Mac gets. The engine first asks the kernel to leave it out of Henge's footprint,

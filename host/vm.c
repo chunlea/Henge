@@ -821,6 +821,16 @@ void hv_vm_pointer_abs(int x, int y, int buttons, int wheel_notches) {
 void hv_vm_mouse_wheel(int dy) { wheel(HV_REL_WHEEL, dy); }
 void hv_vm_mouse_hwheel(int dx) { wheel(HV_REL_HWHEEL, dx); }
 
+/* The UEFI board's touch screen: a finger (0 to 4) down or moved, or lifted, at x, y in 0..32767 across the
+   guest's picture; then a frame, which is what reports them. */
+void hv_vm_screen_touch(int finger, int down, int x, int y) {
+    if (board.fwcfg) hv_xhci_screen_touch(board.usb, finger, down, x, y);
+}
+
+void hv_vm_screen_frame(uint32_t ts_ms) {
+    if (board.fwcfg) hv_xhci_screen_frame(board.usb, ts_ms);
+}
+
 void hv_vm_touch(int id, int phase, int x, int y, uint32_t ts_ms) {
     if (board.fwcfg) {
         tab_touch(id, phase, x, y);

@@ -107,6 +107,10 @@ void henge_vm_mouse_scroll(int dx, int dy);
    sample's own clock in ms, so the guest computes finger speed from real sample timing. */
 void henge_vm_touch(int finger, int phase, int x, int y, uint32_t ts_ms);
 void henge_vm_touch_frame(uint32_t ts_ms); /* commit one frame with every finger that moved */
+/* A Windows machine's touch screen: a finger (0 to 4) down or moved (down 1) or lifted (0) at x, y in 0..32767
+   across the guest's picture; then a frame, which reports the fingers as they are. */
+void henge_vm_screen_touch(int finger, int down, int x, int y);
+void henge_vm_screen_frame(uint32_t ts_ms);
 void henge_vm_touch_button(int down); /* the pad's full press (a click) */
 /* Where the guest has its pointer, in display pixels. 0, or -1 before it has one. */
 int henge_vm_pointer(int *x, int *y);

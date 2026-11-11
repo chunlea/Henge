@@ -118,6 +118,10 @@ void hv_vm_mouse_hwheel(int dx);
    stable 1..15 per touch; x, y in sensor units (HV_TP_SENSOR_* in devices/xhci.h).
    ts_ms is the touch sample's own clock in ms (see hv_xhci_touch). */
 void hv_vm_touch(int id, int phase, int x, int y, uint32_t ts_ms);
+/* A UEFI machine's touch screen (Windows): a finger, 0 to 4, down or moved (down 1) or lifted (0) at x, y,
+   0..32767 across the guest's picture; hv_vm_screen_frame then reports the fingers as they are. */
+void hv_vm_screen_touch(int finger, int down, int x, int y);
+void hv_vm_screen_frame(uint32_t ts_ms);
 void hv_vm_touch_frame(uint32_t ts_ms); /* commit one frame with every finger that moved */
 void hv_vm_touch_button(int down); /* the pad's full press (a click) */
 /* A UEFI guest's pointer is a tablet: where it is, 0..32767 across the display each way, which buttons are

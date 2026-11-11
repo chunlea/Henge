@@ -154,6 +154,45 @@ static const uint8_t tab_config_desc[34] = {
 
 static const char *const tab_strings[] = {NULL, "HengeVM", "HengeVM USB Tablet", "1"};
 
+/* The UEFI board's touch screen: a HID digitizer Windows takes with what it comes with (five fingers, each a tip
+   switch, a contact number and X and Y as 0..32767 across the display; how many fingers the report holds; the
+   scan's time in 100 us), with the feature report that says how many fingers it can tell apart. */
+
+#define SCR_FINGER \
+    0x09, 0x22, 0xa1, 0x02,                                                 /* usage (finger), collection (logical) */ \
+    0x09, 0x42, 0x15, 0x00, 0x25, 0x01, 0x75, 0x01, 0x95, 0x01, 0x81, 0x02, /* tip switch */ \
+    0x95, 0x07, 0x81, 0x03,                                                 /* 7 bits of nothing */ \
+    0x09, 0x51, 0x25, 0x7f, 0x75, 0x08, 0x95, 0x01, 0x81, 0x02,             /* contact identifier */ \
+    0x05, 0x01, 0x26, 0xff, 0x7f, 0x75, 0x10, 0x55, 0x0e, 0x65, 0x11,       /* generic desktop; 0..32767; units of 0.01 cm */ \
+    0x09, 0x30, 0x35, 0x00, 0x46, 0x40, 0x0b, 0x81, 0x02,                   /* X: 28.8 cm across */ \
+    0x09, 0x31, 0x46, 0x08, 0x07, 0x81, 0x02,                               /* Y: 18 cm down */ \
+    0x05, 0x0d, 0xc0
+
+static const uint8_t scr_report_desc[] = {
+    0x05, 0x0d, 0x09, 0x04, 0xa1, 0x01, 0x85, 0x01, /* usage page (digitizer), usage (touch screen), application; report 1 */
+    SCR_FINGER, SCR_FINGER, SCR_FINGER, SCR_FINGER, SCR_FINGER,
+    0x09, 0x54, 0x25, HV_SCREEN_FINGERS, 0x75, 0x08, 0x95, 0x01, 0x81, 0x02,                   /* contact count */
+    0x55, 0x0c, 0x66, 0x01, 0x10, 0x47, 0xff, 0xff, 0x00, 0x00, 0x27, 0xff, 0xff, 0x00, 0x00, /* seconds, in 100 us */
+    0x75, 0x10, 0x95, 0x01, 0x09, 0x56, 0x81, 0x02,                                           /* scan time */
+    0x85, 0x02, 0x09, 0x55, 0x25, HV_SCREEN_FINGERS, 0x75, 0x08, 0x95, 0x01, 0xb1, 0x02,       /* feature 2: contact count maximum */
+    0xc0,
+};
+
+static const uint8_t scr_device_desc[18] = {
+    18, 1, 0x00, 0x02, 0, 0, 0, 64,
+    0x27, 0x06, 0x05, 0x00,         /* QEMU's vendor, a product of our own */
+    0x00, 0x01, 1, 2, 3, 1,
+};
+
+static const uint8_t scr_config_desc[34] = {
+    9, 2, 34, 0, 1, 1, 0, 0xa0, 50,
+    9, 4, 0, 0, 1, 3, 0, 0, 0,                /* interface 0: HID */
+    9, 0x21, 0x11, 0x01, 0, 1, 0x22, sizeof scr_report_desc & 0xff, sizeof scr_report_desc >> 8,
+    7, 5, 0x81, 3, 64, 0, 4,                  /* EP1 IN, interrupt, 64 bytes, every 4 ms */
+};
+
+static const char *const scr_strings[] = {NULL, "HengeVM", "HengeVM USB Touch Screen", "1"};
+
 /* The CD-ROM drive: USB mass storage, SCSI commands over the bulk-only transport. */
 
 static const uint8_t cd_device_desc[18] = {
@@ -216,6 +255,7 @@ static const struct HvXhciDev devs[] = {
     {tab_strings, tab_device_desc, tab_config_desc, sizeof tab_config_desc, tab_report_desc, sizeof tab_report_desc},
     {cd_strings, cd_device_desc, cd_config_desc, sizeof cd_config_desc, NULL, 0},
     {net_strings, net_device_desc, net_config_desc, sizeof net_config_desc, NULL, 0},
+    {scr_strings, scr_device_desc, scr_config_desc, sizeof scr_config_desc, scr_report_desc, sizeof scr_report_desc},
 };
 
 static int xlog(void) {
@@ -502,6 +542,10 @@ static int control(HvXhci *x, int slot, const uint8_t setup[8], uint8_t *out, in
     } else if (type == 0xa1 && req == 1) { /* GET_REPORT: wValue is (type << 8) | report ID */
         if (kind == HV_USB_KEYBOARD) src = x->state, len = 8;
         else if (kind == HV_USB_TABLET) src = x->tab_state, len = 6;
+        else if (kind == HV_USB_SCREEN) {
+            if (value == (3 << 8 | 2)) tmp[0] = 2, tmp[1] = HV_SCREEN_FINGERS, src = tmp, len = 2; /* feature 2: contact count maximum */
+            else memset(tmp, 0, HV_SCREEN_REPORT), tmp[0] = 1, src = tmp, len = HV_SCREEN_REPORT;
+        }
         else if (kind != HV_USB_TRACKPAD) return -1;
         else {
             int rtype = value >> 8, rid = value & 0xff;
@@ -793,13 +837,16 @@ static void pc_hid_in(HvXhci *x, int slot) {
     struct HvXhciSlot *s = &x->slots[slot];
     enum { DCI = 3 };
     if (!s->ep_running[DCI]) return;
-    int tablet = x->kind[s->dev] == HV_USB_TABLET;
+    int tablet = x->kind[s->dev] == HV_USB_TABLET, screen = x->kind[s->dev] == HV_USB_SCREEN;
     Td *td = &pc_td;
     pthread_mutex_lock(&x->mu);
     for (;;) {
         uint8_t *rep;
         uint64_t len;
-        if (tablet) {
+        if (screen) {
+            if (x->scr_rhead == x->scr_rtail) break;
+            rep = x->scr_reports[x->scr_rhead % HV_TAB_REPORTS], len = HV_SCREEN_REPORT;
+        } else if (tablet) {
             if (x->tab_rhead == x->tab_rtail) break;
             rep = x->tab_reports[x->tab_rhead % HV_TAB_REPORTS], len = 6;
         } else {
@@ -810,7 +857,8 @@ static void pc_hid_in(HvXhci *x, int slot) {
         if (len > td->total) len = td->total;
         td_copy(x, td, rep, len, 1);
         td_complete(x, slot, DCI, &s->ep[DCI], td, len);
-        if (tablet) x->tab_rhead++;
+        if (screen) x->scr_rhead++;
+        else if (tablet) x->tab_rhead++;
         else x->rhead++, x->delivered++;
     }
     pthread_mutex_unlock(&x->mu);
@@ -1719,6 +1767,47 @@ void hv_xhci_pointer(HvXhci *x, int px, int py, int buttons, int wheel) {
     hv_machine_wake(x->m);
 }
 
+void hv_xhci_screen_touch(HvXhci *x, int finger, int down, int px, int py) {
+    if (!x || !x->pc || finger < 0 || finger >= HV_SCREEN_FINGERS) return;
+    px = px < 0 ? 0 : px > 32767 ? 32767 : px;
+    py = py < 0 ? 0 : py > 32767 ? 32767 : py;
+    pthread_mutex_lock(&x->mu);
+    if (down) x->scr_finger[finger].down = 1, x->scr_finger[finger].x = (uint16_t)px, x->scr_finger[finger].y = (uint16_t)py;
+    else if (x->scr_finger[finger].down) x->scr_finger[finger].down = 0, x->scr_finger[finger].lifted = 1; /* where it last was */
+    pthread_mutex_unlock(&x->mu);
+}
+
+/* A scan: the fingers that are down, and those lifted since the last one (once more, tip switch off, where they
+   were, which is how a lift is told). */
+void hv_xhci_screen_frame(HvXhci *x, uint32_t ts_ms) {
+    if (!x || !x->pc) return;
+    uint8_t r[HV_SCREEN_REPORT] = {1};
+    int n = 0, only_moves = 1;
+    pthread_mutex_lock(&x->mu);
+    for (int f = 0; f < HV_SCREEN_FINGERS; f++) {
+        if (!x->scr_finger[f].down && !x->scr_finger[f].lifted) continue;
+        uint8_t *c = r + 1 + n++ * 6;
+        c[0] = x->scr_finger[f].down, c[1] = (uint8_t)f;
+        c[2] = (uint8_t)x->scr_finger[f].x, c[3] = (uint8_t)(x->scr_finger[f].x >> 8);
+        c[4] = (uint8_t)x->scr_finger[f].y, c[5] = (uint8_t)(x->scr_finger[f].y >> 8);
+        if (x->scr_finger[f].lifted) only_moves = 0;
+        x->scr_finger[f].lifted = 0;
+    }
+    if (n) {
+        uint32_t t = ts_ms * 10; /* 100 us units */
+        r[1 + HV_SCREEN_FINGERS * 6] = (uint8_t)n;
+        r[2 + HV_SCREEN_FINGERS * 6] = (uint8_t)t, r[3 + HV_SCREEN_FINGERS * 6] = (uint8_t)(t >> 8);
+        /* A scan on top of one that has not gone out, with the same fingers down in both: the newer one will do. */
+        uint8_t *last = x->scr_rtail != x->scr_rhead ? x->scr_reports[(x->scr_rtail - 1) % HV_TAB_REPORTS] : NULL;
+        int same = last && only_moves && last[1 + HV_SCREEN_FINGERS * 6] == n;
+        for (int i = 0; same && i < n; i++) same = last[1 + i * 6] == r[1 + i * 6] && last[2 + i * 6] == r[2 + i * 6];
+        if (same && x->scr_rtail - x->scr_rhead > 1) memcpy(last, r, sizeof r);
+        else if (x->scr_rtail - x->scr_rhead < HV_TAB_REPORTS) memcpy(x->scr_reports[x->scr_rtail++ % HV_TAB_REPORTS], r, sizeof r);
+    }
+    pthread_mutex_unlock(&x->mu);
+    hv_machine_wake(x->m);
+}
+
 void hv_xhci_poll(HvXhci *x) {
     if (!x || !(x->usbcmd & 1)) return; /* stopped: the rings it knew may be anyone's memory by now */
     for (int slot = 1; slot <= HV_XHCI_SLOTS; slot++) {
@@ -1736,6 +1825,7 @@ static HvXhci *create(HvMachine *m, HvPcie *bus, int pc, HvDisk *cdrom, const ui
     x->kind[0] = HV_USB_KEYBOARD;
     x->kind[1] = pc ? HV_USB_TABLET : HV_USB_TRACKPAD;
     x->nports = 2;
+    if (pc && !getenv("HV_NO_TOUCHSCREEN")) x->kind[x->nports++] = HV_USB_SCREEN;
     if (pc && cdrom) x->kind[x->nports++] = HV_USB_CDROM;
     if (pc && mac) {
         x->kind[x->nports++] = HV_USB_NET;
