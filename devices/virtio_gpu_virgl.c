@@ -228,6 +228,7 @@ struct HvGpuVirgl {
     /* Presenting without a readback (HV_VIRGL_PRESENT): each flush is a GPU copy of the scanout into one of two
        IOSurfaces, by turns, and the host shows the one finished last (hv_gpu_virgl_surface). */
     int present;                          /* 0 no; 1 a GPU blit into the surface; 2 read into the surface's memory */
+    int sizes_set;                        /* the firmware's table of display sizes has been rewritten (firmware_sizes) */
     pthread_mutex_t present_mu;           /* the surfaces, between the worker and whoever shows or reads them */
     IOSurfaceRef surf[2];
     void *pbuf[2];
@@ -775,7 +776,7 @@ static uint32_t hostmem_map(HvGpuVirgl *v, Res *r, uint64_t off, uint32_t *map_i
                 (unsigned long long)r->blob_size, (unsigned long long)off);
         return RESP_ERR_INVALID_PARAMETER;
     }
-    uint64_t bar = hv_pci_bar_addr(&g->vio.pci, 2);
+    uint64_t bar = hv_pci_bar_addr(&g->vio.pci, 4);
     if (!g->hostmem_ram) {
         if (!bar || !(g->hostmem_ram = hv_machine_add_paged_ram(g->m, bar, g->hostmem_size))) return RESP_ERR_UNSPEC;
         g->hostmem_pa = bar;
@@ -971,6 +972,30 @@ static uint32_t flush(HvGpuVirgl *v, const uint8_t *req) {
 }
 
 /* One control request; the response goes into the element now, and back to the guest when done. */
+/* The size Windows starts in. UTM's driver takes its preferred mode from the picture the firmware left it (the
+   "POST display"), not from the EDID's preferred timing, which it replaces; and Windows, on a monitor whose last
+   mode is gone, takes that one. The firmware's picture is EDK2's VirtioGpuDxe's, whose sizes are a table of its
+   own (640 x 480 up, pairs of 32-bit numbers) cut off at the size the device reports, and the boot manager's
+   choice among them is 1024 x 768. As for ramfb (devices/virt.c): the table is made to say the one size wanted,
+   when the firmware's driver first asks for the display's size, which is before it reads the table. */
+static void firmware_sizes(HvVirtioGpu *g) {
+    static const uint32_t first[6] = {640, 480, 800, 480, 800, 600};
+    HvRam *r = g->m->main_ram; /* the device's own memory (hostmem) is not there yet, or is paged */
+    if (!r || !r->host) return;
+    uint64_t span = r->size < (1ull << 30) ? r->size : 1ull << 30; /* drivers are loaded at the top of memory */
+    uint8_t *end = r->host + r->size - 64 * 8;
+    int tables = 0, n = 0;
+    for (uint8_t *p = r->host + (r->size - span); p < end && (p = memmem(p, (size_t)(end - p), first, sizeof first)); p += 8 * n, tables++)
+        for (n = 0; n < 64; n++) {
+            uint32_t e[2];
+            memcpy(e, p + n * 8, sizeof e);
+            if (e[0] < 320 || e[0] > 8192 || e[1] < 200 || e[1] > 8192) break;
+            memcpy(p + n * 8, &g->want_w, 4), memcpy(p + n * 8 + 4, &g->want_h, 4);
+        }
+    if (g->m->log || getenv("HV_GPU_LOG"))
+        fprintf(stderr, "hengevm: virtio-gpu: %d of the firmware's tables of display sizes say %ux%u now\n", tables, g->want_w, g->want_h);
+}
+
 static uint32_t control(HvGpuVirgl *v, Req *q) {
     HvVirtioGpu *g = v->g;
     const HvVirtqElem *e = &q->e;
@@ -983,6 +1008,7 @@ static uint32_t control(HvGpuVirgl *v, Req *q) {
     if (n < 24) type = RESP_ERR_UNSPEC;
     else switch (h.type) {
     case CMD_GET_DISPLAY_INFO: {
+        if (g->d3d && !g->enabled && !v->sizes_set) v->sizes_set = 1, firmware_sizes(g);
         type = RESP_OK_DISPLAY_INFO;
         uint32_t mode[6] = {0, 0, g->d3d ? g->want_w : g->width, g->d3d ? g->want_h : g->height, 1, 0};
         memcpy(resp + 24, mode, sizeof mode);
@@ -1185,6 +1211,7 @@ static uint32_t control(HvGpuVirgl *v, Req *q) {
         display_size(v, sr.w, sr.h);
         v->scanout_res = g->scanout_res = c[1];
         g->enabled = 1;
+        if (!g->ask_until) g->ask_until = time(NULL) + 600; /* Windows' driver draws: its size is to be the one wanted */
         break;
     }
     case CMD_RESOURCE_FLUSH: type = flush(v, req); break;
@@ -1361,6 +1388,7 @@ static void let_go(HvGpuVirgl *v) {
     v->scanout_res = 0;
     while (v->res) unref(v, v->res->id);
     if (vr.reset) vr.reset();
+    v->g->ask_until = 0;
     if (v->g->m->log) fprintf(stderr, "hengevm: virtio-gpu: reset by its driver\n");
 }
 

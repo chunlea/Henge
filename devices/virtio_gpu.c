@@ -7,6 +7,7 @@
 #include <sys/mman.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 
 struct HvGpuResource {
@@ -292,16 +293,28 @@ HvVirtioGpu *hv_virtio_gpu_create_d3d(HvMachine *m, HvPcie *bus, uint32_t width,
         return NULL;
     }
     hv_virtio_init(v, m, 16, 0x038000, 2, GPU_F_VIRGL | GPU_F_EDID | GPU_F_RESOURCE_BLOB | GPU_F_CONTEXT_INIT);
+    /* QEMU's subsystem ID for a virtio 1.0 device. EDK2's driver (Virtio10Dxe) takes no device whose is under
+       0x40, and without it the firmware draws nothing here: the size of its picture is the one Windows' driver
+       starts in (firmware_sizes in virtio_gpu_virgl.c). */
+    v->pci.config[0x2e] = 0x00, v->pci.config[0x2f] = 0x11;
     v->dev = g;
     v->config_write = config_write;
     v->was_reset = was_reset;
     uint32_t cfg[4] = {0, 0, 1, hv_gpu_virgl_capsets(g->virgl)};
     memcpy(v->config, cfg, sizeof cfg);
     v->config_len = 16;
-    hv_virtio_add_shm(v, 2, 1, g->hostmem_size); /* VIRTIO_GPU_SHM_ID_HOST_VISIBLE */
+    hv_virtio_add_shm(v, 1, g->hostmem_size); /* VIRTIO_GPU_SHM_ID_HOST_VISIBLE */
     hv_gpu_virgl_attach(g->virgl);
     hv_pcie_attach(bus, &v->pci);
     return g;
+}
+
+static void display_event(HvVirtioGpu *g) {
+    uint32_t events;
+    memcpy(&events, g->vio.config, 4);
+    events |= 1; /* VIRTIO_GPU_EVENT_DISPLAY */
+    memcpy(g->vio.config, &events, 4);
+    if (g->vio.status & 4) hv_virtio_config_changed(&g->vio);
 }
 
 void hv_virtio_gpu_want_size(HvVirtioGpu *g, uint32_t width, uint32_t height) {
@@ -310,15 +323,32 @@ void hv_virtio_gpu_want_size(HvVirtioGpu *g, uint32_t width, uint32_t height) {
     height = (height < 480 ? 480 : height > GPU_MAX_H ? GPU_MAX_H : height) & ~1u;
     if (width == g->want_w && height == g->want_h) return;
     g->want_w = width, g->want_h = height;
-    uint32_t events;
-    memcpy(&events, g->vio.config, 4);
-    events |= 1; /* VIRTIO_GPU_EVENT_DISPLAY */
-    memcpy(g->vio.config, &events, 4);
-    if (g->vio.status & 4) hv_virtio_config_changed(&g->vio);
+    if (g->ask_until) g->ask_until = time(NULL) + 60, g->ask_next = 0;
+    display_event(g);
+}
+
+/* Windows starts in the size it last had on this monitor, or 1024 x 768 where that one is gone: UTM's driver has
+   no say in it (its preferred mode is the firmware's linear framebuffer's, and EDK2's picture on this device has
+   none). The size wanted is applied by the driver's helper in the user's session (viogpuap), when a display
+   event comes, and it is not there to hear one before the user is signed in. So, from when the driver first
+   draws and after a new size is wanted, the event is repeated until the picture has the size: every 3 seconds,
+   for 10 minutes at most (60 seconds after a change), after which the size is taken for the user's choice. */
+static void ask_size(HvVirtioGpu *g) {
+    if (!g->d3d || !g->ask_until || !g->enabled) return;
+    time_t now = time(NULL);
+    if ((g->width == g->want_w && g->height == g->want_h) || now > g->ask_until) {
+        g->ask_until = -1;
+        return;
+    }
+    if (now < g->ask_next) return;
+    g->ask_next = now + 3;
+    display_event(g);
 }
 
 void hv_virtio_gpu_poll(HvVirtioGpu *g) {
-    if (g) hv_gpu_virgl_poll(g->virgl);
+    if (!g) return;
+    hv_gpu_virgl_poll(g->virgl);
+    ask_size(g);
 }
 
 void hv_virtio_gpu_compose(HvVirtioGpu *g, uint32_t *out) {

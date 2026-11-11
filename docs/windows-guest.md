@@ -103,6 +103,16 @@ Direct3D 11 on Metal, in its render server: a process of its own on a Mac (UTM's
 again without its sandbox by `ios/scripts/fetch_virgl.sh`), a thread on iOS. `dwm.exe` then composes
 the desktop on the host's GPU, and Direct3D 11 programs draw with it.
 
+The display's size with the GPU. Windows starts in the size it last had on the monitor, or 1024 x 768 where
+that one is gone; UTM's driver takes its preferred mode from the firmware's linear framebuffer, which EDK2's
+picture on a virtio GPU does not have. The size wanted (`--screen`, the iOS machine's setting, a resized
+window) is applied by the driver's helper in the user's session (`viogpuap.exe`) when a display event comes,
+so the device repeats the event from when the driver first draws until the picture has that size
+(`ask_size`, `devices/virtio_gpu.c`). For the firmware to draw on the device at all (the picture before
+Windows' driver starts, at the size wanted: `firmware_sizes`), the device is laid out as QEMU's: subsystem ID
+0x1100, registers in BAR 2 and the shared memory in BAR 4. EDK2 numbers BARs in the order found, a 64-bit one
+counting once, and found no registers the other way round.
+
 On iOS dxmt is held to feature level 11_0 (`DXMT_CONFIG=d3d11.maxFeatureLevel=11_0`, set by the device). Its
 iOS build has no logic operations in the output merger, which 11_1 requires: offered an 11_1 device without
 them, `dwm.exe` made its device, asked (`CheckFeatureSupport`), and threw it away, again and again, and the

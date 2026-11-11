@@ -22,7 +22,7 @@ static void add_cap(HvVirtio *v, uint8_t at, uint8_t next, uint8_t type, uint32_
     c[1] = next;
     c[2] = type == 2 ? 20 : 16;
     c[3] = type;
-    c[4] = BAR;
+    c[4] = v->bar;
     memcpy(c + 8, &off, 4);
     memcpy(c + 12, &len, 4);
     if (type == 2) {
@@ -118,7 +118,7 @@ static void common_write(HvVirtio *v, uint64_t off, uint64_t val, unsigned size)
 
 static uint64_t bar_read(HvPciDev *d, int bar, uint64_t off, unsigned size) {
     HvVirtio *v = d->opaque;
-    if (bar != BAR) return ~0ull;
+    if (bar != v->bar) return ~0ull;
     if (off < ISR) return common_read(v, off);
     if (off < DEVICE) { /* ISR: reading clears it and drops the line */
         uint8_t isr = v->isr;
@@ -142,7 +142,7 @@ static uint64_t bar_read(HvPciDev *d, int bar, uint64_t off, unsigned size) {
 
 static void bar_write(HvPciDev *d, int bar, uint64_t off, uint64_t val, unsigned size) {
     HvVirtio *v = d->opaque;
-    if (bar != BAR) return;
+    if (bar != v->bar) return;
     if (off < ISR) {
         common_write(v, off, val, size);
     } else if (off >= DEVICE && off < NOTIFY) {
@@ -162,6 +162,7 @@ void hv_virtio_init(HvVirtio *v, HvMachine *m, int device_id, uint32_t class_cod
     v->pci.opaque = v;
     v->pci.bar_read = bar_read;
     v->pci.bar_write = bar_write;
+    v->bar = BAR;
     hv_pci_add_bar(&v->pci, BAR, 0x4000, 1);
     v->pci.config[0x06] |= 0x10;                 /* capability list */
     v->pci.config[0x34] = 0x40;
@@ -172,12 +173,18 @@ void hv_virtio_init(HvVirtio *v, HvMachine *m, int device_id, uint32_t class_cod
     reset(v);
 }
 
-void hv_virtio_add_shm(HvVirtio *v, int bar, uint8_t id, uint64_t size) {
-    hv_pci_add_bar(&v->pci, bar, size, 2);
+void hv_virtio_add_shm(HvVirtio *v, uint8_t id, uint64_t size) {
+    /* The registers move to BAR 2 and the shared memory takes BAR 4, as in QEMU's virtio-gpu with host memory.
+       The other way round EDK2 cannot drive the device: its PCI bus numbers BARs in the order it finds them, a
+       64-bit one counting once, so registers in a BAR after a 64-bit one are not where their capability says. */
+    hv_pci_add_bar(&v->pci, BAR, size, 2);
+    v->bar = 2;
+    hv_pci_add_bar(&v->pci, v->bar, 0x4000, 1);
+    for (int at = 0x40; at <= 0x70; at += 0x10) v->pci.config[at + 4] = v->bar;
     v->pci.config[0x71] = 0x88;     /* the notify capability (20 bytes at 0x70) leads on to this one */
     uint8_t *c = v->pci.config + 0x88;
     c[0] = 0x09, c[1] = 0, c[2] = 24, c[3] = 8; /* VIRTIO_PCI_CAP_SHARED_MEMORY_CFG, a virtio_pci_cap64 */
-    c[4] = (uint8_t)bar, c[5] = id;
+    c[4] = BAR, c[5] = id;
     uint32_t lo = (uint32_t)size, hi = (uint32_t)(size >> 32);
     memcpy(c + 12, &lo, 4);          /* offset 0 (bytes 8-11 and 16-19), then the length's halves */
     memcpy(c + 20, &hi, 4);
