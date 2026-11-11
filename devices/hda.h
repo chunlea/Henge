@@ -53,7 +53,10 @@ typedef struct HvHda {
     uint32_t prime_bytes;
     int shedding;                    /* the ring is over full: sound is left out until it is not */
     uint64_t seen_pulls, seen_ns;    /* the backend's asking, to tell when it has stopped */
-    int backend_on;
+    int backend_on;                  /* a stream is being played through the backend */
+    int out_started;                 /* the backend is running (it stays so a while after the sound) */
+    uint32_t out_fmt;
+    uint64_t out_idle_ns;
     uint64_t played, dropped;
     uint64_t heard_played, heard_dropped; /* HV_HDA_LOG: what a spell of sound came to */
     int peak;

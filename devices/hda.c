@@ -15,10 +15,13 @@ enum {
     BCIS = 1 << 2, FIFORDY = 1 << 5,
     LEAD_MS = 1,             /* how far ahead of a stream's position its sound is taken */
     JITTER_MS = 60,          /* the sound kept in the ring between the guest's buffer and the host's output */
+
     STALL_NS = 150000000,    /* a backend that has taken nothing for this long is not playing */
     NID_ROOT = 0, NID_AFG = 1, NID_DAC = 2, NID_PIN = 3,
     PCM_CAPS = 1 << 17 | 1 << 6 | 1 << 5, /* 16 bits; 48 and 44.1 kHz */
 };
+
+static const uint64_t OUT_IDLE_NS = 30000000000ull; /* the host's output is stopped after this long without sound */
 
 static uint64_t now_ns(void) {
     struct timespec ts;
@@ -273,10 +276,11 @@ static int heard(HvHda *d, HvHdaStream *s) {
 
 static void unhear(HvHda *d, HvHdaStream *s) {
     if (!s->audible) return;
-    if (d->backend_on && d->backend.stop) d->backend.stop(d->backend.opaque);
+    /* The output is left running (it is given silence) and stopped only after a while without sound, in
+       hv_hda_poll: started cold, an iPad's takes some hundreds of milliseconds, the start of every sound. */
     d->backend_on = 0;
     s->audible = 0;
-    s->clock_ns = now_ns();
+    s->clock_ns = d->out_idle_ns = now_ns();
     if (d->m->log || logging())
         fprintf(stderr, "hengevm: hda: stream %d is no longer played: %.2f s of sound, %.2f s more dropped, loudest sample %d, the output ran dry %u times\n", (int)(s - d->st),
                 (double)(d->played - d->heard_played) / (s->rate * s->frame_bytes), (double)(d->dropped - d->heard_dropped) / (s->rate * s->frame_bytes), d->peak, (unsigned)atomic_load(&d->underruns));
@@ -292,7 +296,12 @@ static void hear(HvHda *d, HvHdaStream *s) {
     d->heard_played = d->played, d->heard_dropped = d->dropped, d->peak = 0;
     d->prime_bytes = (uint32_t)((uint64_t)s->rate * s->frame_bytes * JITTER_MS / 1000);
     atomic_store(&d->primed, 0), atomic_store(&d->underruns, 0);
-    d->backend_on = d->backend.start && d->backend.start(d->backend.opaque, (s->fmt & 0xf) + 1, HV_VSND_FMT_S16, s->rate) == 0;
+    uint32_t fmt = s->rate << 4 | (s->fmt & 0xf);
+    if (d->out_started && d->out_fmt == fmt) d->backend_on = 1; /* still running since the last sound */
+    else {
+        d->backend_on = d->backend.start && d->backend.start(d->backend.opaque, (s->fmt & 0xf) + 1, HV_VSND_FMT_S16, s->rate) == 0;
+        d->out_started = d->backend_on, d->out_fmt = fmt;
+    }
     s->audible = 1;
     if (d->m->log || logging())
         fprintf(stderr, "hengevm: hda: stream %d is played: %u Hz, %u channels%s\n", (int)(s - d->st), s->rate, (s->fmt & 0xf) + 1,
@@ -342,6 +351,10 @@ static void stream_ctl(HvHda *d, HvHdaStream *s) {
 int hv_hda_poll(HvHda *d) {
     if (!d) return 0;
     uint64_t now = 0;
+    if (d->out_started && !d->backend_on && (now = now_ns()) - d->out_idle_ns > OUT_IDLE_NS) {
+        if (d->backend.stop) d->backend.stop(d->backend.opaque);
+        d->out_started = 0;
+    }
     int any = 0;
     for (int i = 0; i < HV_HDA_STREAMS; i++) {
         HvHdaStream *s = &d->st[i];
