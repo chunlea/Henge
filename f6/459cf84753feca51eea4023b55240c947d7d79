@@ -1,0 +1,19 @@
+core/translate.c
+  s_1715eb4cbe1177::t_726084e4852cd9 1293-1303,1307,1312,1538-1550
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "f6459cf84753feca51eea4023b55240c947d7d79",
+  "prompts": {},
+  "sessions": {
+    "s_1715eb4cbe1177": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "71a11e59-e498-4b36-8578-5dae1d0ffed1",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "chunli <git@chunli.dev>"
+    }
+  }
+}
