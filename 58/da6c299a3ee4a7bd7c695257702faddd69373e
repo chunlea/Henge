@@ -1,0 +1,35 @@
+core/machine.c
+  s_be58c8822e297c::t_8f8f5520aa0ec3 426-428,444-446
+devices/pcie.c
+  s_be58c8822e297c::t_7b598adbd22580 40,134-158
+devices/pcie.h
+  s_be58c8822e297c::t_d77bdbd1e9edc6 43,45-46
+devices/virt.c
+  s_be58c8822e297c::t_ab41d1df1eafbb 111
+devices/virt.h
+  s_be58c8822e297c::t_75dade3e9f6a69 31-32
+devices/virtio.c
+  s_be58c8822e297c::t_3025d916aeef98 164-174
+devices/virtio.h
+  s_be58c8822e297c::t_91e3330736f0f3 54-57
+host/acpi.c
+  s_be58c8822e297c::t_6ef3dd06094459 171-173
+host/uefi_boot.c
+  s_be58c8822e297c::t_0eb7a25c1fd44e 160-164
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "58da6c299a3ee4a7bd7c695257702faddd69373e",
+  "prompts": {},
+  "sessions": {
+    "s_be58c8822e297c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "460830a0-c917-44aa-9aea-92d45fd794ef",
+        "model": "unknown"
+      },
+      "human_author": "chunli <git@chunli.dev>"
+    }
+  }
+}
