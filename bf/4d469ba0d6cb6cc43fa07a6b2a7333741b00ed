@@ -1,0 +1,23 @@
+ios/Henge/HengeApp.swift
+  s_b434919f53a453::t_027cdd0bd5f2be 46-47,73-85
+ios/Henge/SettingsView.swift
+  s_b434919f53a453::t_883714b0c65894 20,155-158
+ios/Henge/WelcomeView.swift
+  s_b434919f53a453::t_df7a065f171050 1-643
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "bf4d469ba0d6cb6cc43fa07a6b2a7333741b00ed",
+  "prompts": {},
+  "sessions": {
+    "s_b434919f53a453": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e46d13fe-34ab-43b9-8d44-1e8747a007c8",
+        "model": "unknown"
+      },
+      "human_author": "chunli <git@chunli.dev>"
+    }
+  }
+}
