@@ -452,6 +452,12 @@ static int bring_up(HvGpuVirgl *v) {
         snprintf(path, sizeof path, "%s/dxmt-native.framework/dxmt-native", d);
         setenv("NPT_D3D11_LIBRARY_PATH", path, 0), setenv("NPT_DXGI_LIBRARY_PATH", path, 0), setenv("NPT_D3D12_LIBRARY_PATH", path, 0);
         setenv("NPT_BACKEND", "dxmt", 0);
+#if TARGET_OS_IPHONE
+        /* Feature level 11_1 requires logic operations in the output merger, which dxmt has on a Mac only (the
+           iOS build answers OutputMergerLogicOp with no). Windows takes an 11_1 device that lacks them for a
+           broken one: dwm makes its device, asks, and throws it away, forever. At 11_0 they are optional. */
+        setenv("DXMT_CONFIG", "d3d11.maxFeatureLevel=11_0", 0);
+#endif
         snprintf(path, sizeof path, "%s/../macos-server/Contents/XPCServices/QEMUHelper.xpc/Contents/MacOS/QEMURenderServer.app/Contents/MacOS/QEMURenderServer", d);
         if (access(path, X_OK) == 0) setenv("RENDER_SERVER_EXEC_PATH", path, 0);
         load(d, "dxmt-native.framework/dxmt-native", 0); /* here already, so its imports can be redirected too */
