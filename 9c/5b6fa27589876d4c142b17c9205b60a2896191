@@ -1,0 +1,47 @@
+core/mmu.h
+  s_d8aca87b39e3c8::t_85c0b71b1917d8 58-62
+core/sysreg.c
+  s_d8aca87b39e3c8::t_7914931634fa09 214,217-221,225-226,228-234
+core/translate.c
+  s_d8aca87b39e3c8::t_0d94d11061ebe7 1975,1977-1980
+ios/.gitignore
+  s_d8aca87b39e3c8::t_dfb9eda8db313e 1
+ios/Henge/BootDisplay.swift
+  s_d8aca87b39e3c8::t_b122ff6c21e921 19-20,29-31,62,71,78-84,92
+ios/Henge/EngineTuning.swift
+  s_d8aca87b39e3c8::t_59ffc9433f06ed 31-33
+ios/Henge/Hardware.swift
+  s_d8aca87b39e3c8::t_4ebfcf786baf1e 85-115,119-121,123-137,142,166-169,171,178-189,192,201,204-227
+ios/Henge/Input.swift
+  s_d8aca87b39e3c8::t_d9873d8ef6c1ce 67-69
+ios/Henge/LinuxScreen.swift
+  s_d8aca87b39e3c8::t_626e6201ff88c4 1-117
+ios/Henge/LinuxShortcuts.swift
+  s_d8aca87b39e3c8::t_24f6a399387302 1-159
+ios/Henge/Native/henge-vm.c
+  s_d8aca87b39e3c8::t_4a7232948d6c5f 416-434
+ios/Henge/Native/henge-vm.h
+  s_d8aca87b39e3c8::t_f2fa83c35ae3c4 117-123
+ios/Henge/SessionView.swift
+  s_d8aca87b39e3c8::t_e7525a787c124a 12-13,197,295-298,385-409,418,610-611
+ios/Henge/SettingsView.swift
+  s_d8aca87b39e3c8::t_201d95d70cc7c6 13-14,36-51,121-133
+tests/test_mmu.c
+  s_d8aca87b39e3c8::t_b5138f36206e03 546-585
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "9c5b6fa27589876d4c142b17c9205b60a2896191",
+  "prompts": {},
+  "sessions": {
+    "s_d8aca87b39e3c8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1b30f10f-63e2-401c-a99c-92c3ba7de4f9",
+        "model": "claude-fable-5-2"
+      },
+      "human_author": "chunli <git@chunli.dev>"
+    }
+  }
+}
