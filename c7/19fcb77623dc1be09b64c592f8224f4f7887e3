@@ -1,0 +1,31 @@
+ios/Henge/EngineTuning.swift
+  s_be58c8822e297c::t_3690ef256a2532 29-35
+ios/Henge/Machines.swift
+  s_be58c8822e297c::t_c7ae7e37184bc1 45-48
+ios/Henge/Native/henge-vm.c
+  s_be58c8822e297c::t_a1a799a3e33485 135,144
+ios/Henge/Native/henge-vm.h
+  s_be58c8822e297c::t_4525e4bc15e983 20-21,23
+ios/Henge/SessionView.swift
+  s_be58c8822e297c::t_56d8a73da76b86 563-573,696-702
+ios/Henge/WindowsView.swift
+  s_be58c8822e297c::t_d4597433bb85ef 42-46,102-127,482-505
+ios/scripts/fetch_virgl.sh
+  s_be58c8822e297c::t_10c993aa932d23 13-15,33-40
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "c719fcb77623dc1be09b64c592f8224f4f7887e3",
+  "prompts": {},
+  "sessions": {
+    "s_be58c8822e297c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "460830a0-c917-44aa-9aea-92d45fd794ef",
+        "model": "unknown"
+      },
+      "human_author": "chunli <git@chunli.dev>"
+    }
+  }
+}

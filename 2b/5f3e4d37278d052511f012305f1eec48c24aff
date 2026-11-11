@@ -1,0 +1,39 @@
+Makefile
+  s_be58c8822e297c::t_acff73fdf82fbd 10
+devices/hda.c
+  s_be58c8822e297c::t_c74e77f0c5a840 1-494
+devices/hda.h
+  s_be58c8822e297c::t_2f20577918bd28 1-63
+devices/virt.c
+  s_be58c8822e297c::t_6c9175c391164a 137-139
+devices/virt.h
+  s_be58c8822e297c::t_e4862440f4e9b4 7
+devices/vmapple.c
+  s_be58c8822e297c::t_d12be4d24a2a03 236,400
+devices/vmapple.h
+  s_be58c8822e297c::t_ace4321fcb772b 94
+host/audio_mac.c
+  s_be58c8822e297c::t_05eaac33dfb551 20-21,26,28,33,56,77-83,85
+host/audio_mac.h
+  s_be58c8822e297c::t_4ea86a43c1f459 8-10
+host/vm.c
+  s_be58c8822e297c::t_50f34484fa743a 425
+docs/windows-guest.md
+  s_be58c8822e297c::t_5ecbaa91560d26 106-113
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "2b5f3e4d37278d052511f012305f1eec48c24aff",
+  "prompts": {},
+  "sessions": {
+    "s_be58c8822e297c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "460830a0-c917-44aa-9aea-92d45fd794ef",
+        "model": "unknown"
+      },
+      "human_author": "chunli <git@chunli.dev>"
+    }
+  }
+}

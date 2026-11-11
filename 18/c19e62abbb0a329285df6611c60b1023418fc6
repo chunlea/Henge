@@ -1,0 +1,29 @@
+devices/virtio.c
+  s_be58c8822e297c::t_fad6b2eaa599cd 25,121,145,165,176-183,187
+devices/virtio.h
+  s_be58c8822e297c::t_82d5b897c2af56 43,57-58,60
+devices/virtio_gpu.c
+  s_be58c8822e297c::t_a406be18ebf630 10,296-299,306,312-319,326-345,349-351
+devices/virtio_gpu.h
+  s_be58c8822e297c::t_aa176fc602902d 35
+devices/virtio_gpu_virgl.c
+  s_be58c8822e297c::t_1863e2ea11878d 231,779,975-998,1011,1214,1391
+docs/windows-guest.md
+  s_be58c8822e297c::t_c37e8aa6a8cedf 106-115
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "18c19e62abbb0a329285df6611c60b1023418fc6",
+  "prompts": {},
+  "sessions": {
+    "s_be58c8822e297c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "460830a0-c917-44aa-9aea-92d45fd794ef",
+        "model": "unknown"
+      },
+      "human_author": "chunli <git@chunli.dev>"
+    }
+  }
+}

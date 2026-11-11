@@ -1,0 +1,37 @@
+devices/virt.c
+  s_be58c8822e297c::t_7ea5f5f1f2bdcc 106-108
+devices/virt.h
+  s_be58c8822e297c::t_caaa5e9ea4725b 52
+host/main.c
+  s_be58c8822e297c::t_7d67e04fa3d17d 1032,1088,1119
+host/vm.c
+  s_be58c8822e297c::t_ae969210832c99 80-81,370
+host/vm.h
+  s_be58c8822e297c::t_41a677c9758770 36,53-54
+ios/Henge/Machines.swift
+  s_be58c8822e297c::t_4069f9fd6e43ad 49-51
+ios/Henge/Native/henge-vm.c
+  s_be58c8822e297c::t_98aa78fc2d2c67 135,144,377-383
+ios/Henge/Native/henge-vm.h
+  s_be58c8822e297c::t_e103357f7d8de9 21-23,25-27
+ios/Henge/SessionView.swift
+  s_be58c8822e297c::t_d5e96e7ff6e9cd 701,703,772-777
+ios/Henge/WindowsView.swift
+  s_be58c8822e297c::t_c797ddb5b005e9 484-488,492-493
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "9674e38426e1e00975fa4f6daa136db018a687d4",
+  "prompts": {},
+  "sessions": {
+    "s_be58c8822e297c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "460830a0-c917-44aa-9aea-92d45fd794ef",
+        "model": "unknown"
+      },
+      "human_author": "chunli <git@chunli.dev>"
+    }
+  }
+}
