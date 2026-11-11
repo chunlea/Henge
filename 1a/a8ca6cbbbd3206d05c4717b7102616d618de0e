@@ -1,0 +1,49 @@
+host/main.c
+  s_88b4b41dd4e594::t_9a519ff5e67d6e 605-613
+host/vm.c
+  s_88b4b41dd4e594::t_4efa61336c3ea4 824-833
+host/vm.h
+  s_88b4b41dd4e594::t_692684fb6cad79 121-124
+ios/Henge/Native/henge-vm.c
+  s_88b4b41dd4e594::t_a6e21d20650b37 414-423
+devices/xhci.c
+  s_be58c8822e297c::t_93e63dc17f92d6 157-195,258,545-548,840,846-849,860-861,1770-1810,1828
+devices/xhci.h
+  s_be58c8822e297c::t_74dcdc83b23e30 18,24-26,74,107-111,145-149
+ios/Henge/Native/henge-vm.h
+  s_be58c8822e297c::t_d8b637e7767dd5 110-113
+docs/windows-guest.md
+  s_be58c8822e297c::t_404972905b598e 106-112
+ios/Henge/Machines.swift
+  s_be58c8822e297c::t_99d1e04e6492f2 52-54
+ios/Henge/SessionView.swift
+  s_be58c8822e297c::t_9b13a8ad054dd0 95-104
+ios/Henge/Trackpad.swift
+  s_be58c8822e297c::t_f3728e17599109 220-304
+ios/Henge/WindowsView.swift
+  s_be58c8822e297c::t_fa6d41881672a3 480-493
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "1aa8ca6cbbbd3206d05c4717b7102616d618de0e",
+  "prompts": {},
+  "sessions": {
+    "s_88b4b41dd4e594": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "98a82d02-f90c-4ce4-92d5-c699e5f6aa85",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "chunli <git@chunli.dev>"
+    },
+    "s_be58c8822e297c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "460830a0-c917-44aa-9aea-92d45fd794ef",
+        "model": "unknown"
+      },
+      "human_author": "chunli <git@chunli.dev>"
+    }
+  }
+}
