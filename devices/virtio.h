@@ -40,6 +40,7 @@ typedef struct HvVirtio {
     uint8_t status, isr, config_gen;
     uint16_t qsel, nq;
     uint16_t msix_config;      /* what the driver wrote as the config interrupt's vector, read back (there is no MSI-X) */
+    uint8_t bar;               /* the BAR the registers are in: 4, or 2 on a device with shared memory (hv_virtio_add_shm) */
     HvVirtq q[HV_VIRTQ_MAX];
     uint8_t config[256];
     uint32_t config_len;
@@ -53,9 +54,10 @@ typedef struct HvVirtio {
    modern 0x1af4:0x1040+id and may be changed afterwards. */
 void hv_virtio_init(HvVirtio *v, HvMachine *m, int device_id, uint32_t class_code, int nq, uint64_t features);
 
-/* A shared memory region (virtio 1.2, 4.1.4.7): BAR `bar` (64-bit, prefetchable), all of it, as region `id`.
+/* A shared memory region (virtio 1.2, 4.1.4.7): BAR 4 (64-bit, prefetchable), all of it, as region `id`; the
+   registers move to BAR 2.
    The BAR's memory is the device's business: nothing here reads or writes it. Once, after hv_virtio_init. */
-void hv_virtio_add_shm(HvVirtio *v, int bar, uint8_t id, uint64_t size);
+void hv_virtio_add_shm(HvVirtio *v, uint8_t id, uint64_t size);
 
 /* 1 and an element if the driver made one available, 0 if not, -1 if the ring is broken. */
 int hv_virtq_pop(HvVirtio *v, int q, HvVirtqElem *e);

@@ -32,6 +32,7 @@ typedef struct HvVirtioGpu {
     HvGpuVirgl *virgl;         /* 3D (virglrenderer), or NULL: 2D only */
     /* A device whose guest has a Direct3D driver for it (hv_virtio_gpu_create_d3d). */
     int d3d;
+    long long ask_until, ask_next; /* display events are repeated until the picture has the size wanted (virtio_gpu.c, ask_size): 0 not begun, -1 over */
     int enabled;               /* a resource is on the scanout: the picture is this device's (not the firmware's framebuffer) */
     uint32_t want_w, want_h;   /* the size the display would like to be (EDID, display info) */
     uint64_t hostmem_size;     /* the host-visible shared memory region: BAR 2, this big */
