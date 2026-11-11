@@ -602,6 +602,15 @@ static void *input_thread(void *unused) {
                 if (phase == 1) hv_xhci_touch_frame(board.usb, ms);
             }
         }
+        else if (!strncmp(line, "finger ", 7)) { /* "finger ID 1|0 X Y": a finger on the touch screen, down or moved, or lifted; X and Y in thousandths of the display */
+            int id = 0, down = 0, px = 0, py = 0;
+            if (sscanf(line + 7, "%d %d %d %d", &id, &down, &px, &py) == 4) {
+                struct timespec ts;
+                clock_gettime(CLOCK_MONOTONIC, &ts);
+                hv_xhci_screen_touch(board.usb, id, down, px * 32767 / 1000, py * 32767 / 1000);
+                hv_xhci_screen_frame(board.usb, (uint32_t)((uint64_t)ts.tv_sec * 1000 + (uint64_t)ts.tv_nsec / 1000000));
+            }
+        }
         else if (!strncmp(line, "tpclick ", 8)) /* "tpclick 1|0": the Magic Trackpad 2's own press (testing) */
             hv_xhci_touch_button(board.usb, atoi(line + 8));
         else if (!strncmp(line, "press", 5) || !strncmp(line, "release", 7)) {

@@ -15,13 +15,15 @@
    (hv_xhci_poll). */
 #define HV_XHCI_SLOTS 8
 #define HV_XHCI_PORTS 2      /* the virtual Mac's */
-#define HV_XHCI_MAX_PORTS 4
+#define HV_XHCI_MAX_PORTS 6
 #define HV_XHCI_DEVICES 2
 /* What can sit on a port. The virtual Mac has the first two. The UEFI board (hv_xhci_create_pc) has a
    keyboard, a tablet (a pointer that reports where it is on the screen, as QEMU's usb-tablet does: no
    mouse to capture) and, with installation media, a USB CD-ROM drive (mass storage, bulk-only, SCSI):
    devices Windows has drivers for out of the box. So is the network card, a CDC NCM function. */
-enum { HV_USB_KEYBOARD, HV_USB_TRACKPAD, HV_USB_TABLET, HV_USB_CDROM, HV_USB_NET };
+enum { HV_USB_KEYBOARD, HV_USB_TRACKPAD, HV_USB_TABLET, HV_USB_CDROM, HV_USB_NET, HV_USB_SCREEN };
+#define HV_SCREEN_FINGERS 5
+#define HV_SCREEN_REPORT (1 + HV_SCREEN_FINGERS * 6 + 3) /* the ID; tip, contact, X, Y for each finger; how many; the scan time */
 #define HV_TAB_REPORTS 64
 #define HV_XHCI_INTRS 4
 #define HV_XHCI_EPS 32 /* device context index 1..31 */
@@ -69,7 +71,7 @@ typedef struct HvXhci {
         int ep_running[HV_XHCI_EPS];
         /* pc: the control transfer in progress */
         uint8_t setup[8];
-        uint8_t reply[256];
+        uint8_t reply[512];
         int reply_len;   /* -1: the request is refused (a stall at its next stage) */
     } slots[HV_XHCI_SLOTS + 1];
     /* keyboard reports waiting for an IN transfer (8 bytes each) */
@@ -102,6 +104,11 @@ typedef struct HvXhci {
     uint8_t tab_reports[HV_TAB_REPORTS][6];
     uint32_t tab_rhead, tab_rtail;
     uint8_t tab_state[6];
+    /* The touch screen: its fingers as last told (hv_xhci_screen_touch), and the reports made of them at each
+       frame, waiting for an IN transfer; under mu. */
+    struct { uint8_t down, lifted; uint16_t x, y; } scr_finger[HV_SCREEN_FINGERS];
+    uint8_t scr_reports[HV_TAB_REPORTS][HV_SCREEN_REPORT];
+    uint32_t scr_rhead, scr_rtail;
     /* The CD-ROM drive: one command at a time, as bulk-only transport has it. */
     HvDisk *cd;
     int msc_state;         /* waiting for a command, sending data, taking data, or owing the status */
@@ -135,6 +142,11 @@ int hv_xhci_net_receive(HvXhci *x, const uint8_t *frame, uint32_t len);
 /* Any thread: where the tablet's pointer is (0..32767 across the display, each way) and which buttons
    are down (bit 0 left, 1 right, 2 middle); wheel is a number of notches turned since the last call. */
 void hv_xhci_pointer(HvXhci *x, int px, int py, int buttons, int wheel);
+/* Any thread: the UEFI board's touch screen. A finger (0 to 4) comes down or moves (down 1) or lifts (0) at
+   px, py, 0..32767 across the display each way; hv_xhci_screen_frame then reports the fingers as they are,
+   all in one report, as a touch screen's scan does. */
+void hv_xhci_screen_touch(HvXhci *x, int finger, int down, int px, int py);
+void hv_xhci_screen_frame(HvXhci *x, uint32_t ts_ms);
 /* Any thread: a key went down or up (HID usage page 7 usage, e.g. 4 = A; 0xe0-0xe7 are modifiers). */
 void hv_xhci_key(HvXhci *x, uint8_t usage, int down);
 /* The same, by Linux input key code (what the host UI produces). */

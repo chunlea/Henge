@@ -479,6 +479,20 @@ struct WindowsSettingsView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .deskCard()
 
+                DeskHeading("Touch")
+                VStack(alignment: .leading, spacing: 10) {
+                    Toggle("Touch Screen", isOn: Binding(get: { machine.touchAsTrackpad != true }, set: {
+                        machine.touchAsTrackpad = $0 ? nil : true
+                        machines.update(machine)
+                    }))
+                        .font(.system(size: 16))
+                    Text("Windows sees your fingers where they touch its picture, five at most, with its own gestures: tap, press and hold for a menu, drag to scroll, two fingers to zoom. Off, the picture is a trackpad's surface: one finger moves the pointer, two scroll.")
+                        .font(.system(size: 13)).foregroundStyle(Desk.dim)
+                }
+                .padding(17)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .deskCard()
+
                 DeskHeading("GPU")
                 VStack(alignment: .leading, spacing: 10) {
                     Toggle("GPU", isOn: Binding(get: { machine.gpu != false }, set: {

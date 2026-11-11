@@ -411,6 +411,16 @@ void henge_vm_touch(int finger, int phase, int x, int y, uint32_t ts_ms) {
     hv_vm_touch(finger, phase, x, y, ts_ms);
     pthread_rwlock_unlock(&api_lock);
 }
+void henge_vm_screen_touch(int finger, int down, int x, int y) {
+    if (!lock_running()) return;
+    hv_vm_screen_touch(finger, down, x, y);
+    pthread_rwlock_unlock(&api_lock);
+}
+void henge_vm_screen_frame(uint32_t ts_ms) {
+    if (!lock_running()) return;
+    hv_vm_screen_frame(ts_ms);
+    pthread_rwlock_unlock(&api_lock);
+}
 void henge_vm_touch_frame(uint32_t ts_ms) {
     if (!lock_running()) return;
     hv_vm_touch_frame(ts_ms);
