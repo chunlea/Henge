@@ -105,9 +105,14 @@ the desktop on the host's GPU, and Direct3D 11 programs draw with it.
 
 Sound is an Intel HD Audio controller (`devices/hda.c`: ICH6's IDs as QEMU's intel-hda, one codec with a
 stereo output, 16 bits at 44.1 or 48 kHz), which Windows drives with what it comes with (hdaudbus and the HD
-Audio class driver). The stream's bytes are taken from the guest's buffer 40 ms ahead of what the host's
-output has played, so the position Windows reads is the host's audio clock; with no output, the stream moves
-by the wall clock. Windows reads positions from the registers' second copy at 0x2000, which has to be there.
+Audio class driver). Windows makes the stream's buffer 20 ms and keeps it full by its own clock, so the
+stream moves as a sound card's does: at its rate by the clock exactly, a millisecond at a time (the board
+ticks every millisecond while one runs), its sound taken a millisecond ahead of the position into a ring that
+holds 60 ms for the host's output. Taken in the output's lumps, or behind the position, or at a rate bent to
+suit the output, it was last lap's sound or the next one's (a robot's voice); the output's own clock drift
+is absorbed in the ring. Windows reads positions from the registers' second copy at 0x2000, which has to be
+there. `HV_HDA_DUMP=file` keeps what the output was given, which is how this was measured (a 440 Hz
+`[console]::beep`, its periods and jumps counted).
 `HV_HDA_LOG=1` says when sound starts and stops and how loud it was; 2 and 3 add the registers' traffic.
 `HV_NO_SOUND` leaves the card out.
 
