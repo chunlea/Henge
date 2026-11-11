@@ -91,6 +91,7 @@ typedef struct HvVmapple {
     uint64_t mem_base;       /* where guest RAM starts: VMAPPLE_MEM, or VIRT_MEM on the UEFI board (devices/virt.h) */
     /* The UEFI board only: */
     struct HvFwCfg *fwcfg;
+    struct HvHda *hda;       /* its sound card */
     struct HvNvme *nvme;     /* its disk */
     struct HvPflash *vars;   /* the firmware's variables */
     uint8_t *fw_code;        /* the firmware itself, read-only to the guest */

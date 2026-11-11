@@ -233,6 +233,7 @@ static uint64_t tick_locked(HvMachine *m, HvCpu *cpu) {
     hv_virtio_balloon_poll(b->balloon);
     hv_virtio_gpu_poll(b->gpu);
     hv_nvme_poll(b->nvme);
+    hv_hda_poll(b->hda);
     hv_bdif_poll(b->bdif);
     return deadline; /* every GIC state change already updated the CPU's lines */
 }
@@ -396,6 +397,7 @@ void hv_vmapple_destroy(HvVmapple *b) {
     free(b->cfg);
     hv_fw_cfg_destroy(b->fwcfg);
     hv_nvme_destroy(b->nvme);
+    hv_hda_destroy(b->hda);
     hv_pflash_destroy(b->vars);
     if (b->fw_code && b->fw_code != MAP_FAILED) munmap(b->fw_code, VIRT_FLASH_SIZE);
     if (b->rom && b->rom != MAP_FAILED) munmap(b->rom, ROM_SIZE);

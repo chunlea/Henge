@@ -103,6 +103,14 @@ Direct3D 11 on Metal, in its render server: a process of its own on a Mac (UTM's
 again without its sandbox by `ios/scripts/fetch_virgl.sh`), a thread on iOS. `dwm.exe` then composes
 the desktop on the host's GPU, and Direct3D 11 programs draw with it.
 
+Sound is an Intel HD Audio controller (`devices/hda.c`: ICH6's IDs as QEMU's intel-hda, one codec with a
+stereo output, 16 bits at 44.1 or 48 kHz), which Windows drives with what it comes with (hdaudbus and the HD
+Audio class driver). The stream's bytes are taken from the guest's buffer 40 ms ahead of what the host's
+output has played, so the position Windows reads is the host's audio clock; with no output, the stream moves
+by the wall clock. Windows reads positions from the registers' second copy at 0x2000, which has to be there.
+`HV_HDA_LOG=1` says when sound starts and stops and how loud it was; 2 and 3 add the registers' traffic.
+`HV_NO_SOUND` leaves the card out.
+
 The display's size with the GPU. Windows starts in the size it last had on the monitor, or 1024 x 768 where
 that one is gone; UTM's driver takes its preferred mode from the firmware's linear framebuffer, which EDK2's
 picture on a virtio GPU does not have. The size wanted (`--screen`, the iOS machine's setting, a resized

@@ -4,6 +4,7 @@
 #include <stdint.h>
 
 #include "fw_cfg.h"
+#include "hda.h"
 #include "nvme.h"
 #include "pflash.h"
 #include "vmapple.h"

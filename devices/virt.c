@@ -134,6 +134,9 @@ int hv_virt_create(HvVmapple *b, HvMachine *m, HvCpu *cpus, const HvVirtParams *
         b->mouse = hv_virtio_input_create(m, b->pcie, HV_VINPUT_MOUSE);
     }
 
+    /* Sound: an HD Audio controller, which Windows has a driver for. */
+    if (!getenv("HV_NO_SOUND")) b->hda = hv_hda_create(m, b->pcie);
+
     /* A GPU beside the firmware's framebuffer: Windows draws in the framebuffer until its driver for this one
        (viogpu3d) is installed and takes the display. */
     if (p->gpu_dir) {
