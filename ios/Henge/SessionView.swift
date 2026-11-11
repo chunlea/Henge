@@ -704,7 +704,11 @@ struct SessionView: View {
             // In the drive: the installation disc, or else the disc with the GPU driver.
             let tools = FileManager.default.fileExists(atPath: mac.tools.path)
             let disc = media ? mac.media.path : tools ? mac.tools.path : nil
-            let gpu = mac.gpu == true ? EngineTuning.windowsGPU : nil
+            // HV_WIN_GPU (autopilot's env): the GPU for this start whatever the machine's switch says, with what its
+            // contexts were sent kept in Documents (HV_NPT_DUMP), for looking into why Windows gives the GPU up here.
+            let forced = getenv("HV_WIN_GPU") != nil
+            if forced { setenv("HV_NPT_DUMP", FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].path, 1) }
+            let gpu = mac.gpu == true || forced ? EngineTuning.windowsGPU : nil
             HengeLog.log("session", "Windows: disc \(disc.map { ($0 as NSString).lastPathComponent } ?? "none"), GPU \(gpu == nil ? "off" : "on")")
             let gpuOnly = gpu != nil && mac.gpuDriver == true
             rc = henge_vm_boot_uefi(firmware, mac.vars.path, mac.disk.path, disc, ram, Int32(cpus),
