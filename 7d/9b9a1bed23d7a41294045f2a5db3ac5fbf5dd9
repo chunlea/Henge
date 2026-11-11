@@ -1,0 +1,23 @@
+ios/Henge/Machines.swift
+  s_be58c8822e297c::t_8b16e4eb054e41 47-48
+ios/Henge/SessionView.swift
+  s_be58c8822e297c::t_c287f1c47f1319 707
+ios/Henge/WindowsView.swift
+  s_be58c8822e297c::t_a6bc32449af7ce 484,494
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "7d9b9a1bed23d7a41294045f2a5db3ac5fbf5dd9",
+  "prompts": {},
+  "sessions": {
+    "s_be58c8822e297c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "460830a0-c917-44aa-9aea-92d45fd794ef",
+        "model": "unknown"
+      },
+      "human_author": "chunli <git@chunli.dev>"
+    }
+  }
+}
