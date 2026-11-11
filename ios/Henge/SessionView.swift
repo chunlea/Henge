@@ -704,7 +704,7 @@ struct SessionView: View {
             // In the drive: the installation disc, or else the disc with the GPU driver.
             let tools = FileManager.default.fileExists(atPath: mac.tools.path)
             let disc = media ? mac.media.path : tools ? mac.tools.path : nil
-            let gpu = mac.gpu == false ? nil : EngineTuning.windowsGPU
+            let gpu = mac.gpu == true ? EngineTuning.windowsGPU : nil
             HengeLog.log("session", "Windows: disc \(disc.map { ($0 as NSString).lastPathComponent } ?? "none"), GPU \(gpu == nil ? "off" : "on")")
             let gpuOnly = gpu != nil && mac.gpuDriver == true
             rc = henge_vm_boot_uefi(firmware, mac.vars.path, mac.disk.path, disc, ram, Int32(cpus),

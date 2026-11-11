@@ -44,7 +44,8 @@ struct VirtualMac: Identifiable, Codable, Hashable {
     var media: URL { directory.appendingPathComponent("install.iso") }
     /// The disc with the GPU driver (UTM's guest tools), in the drive when there is no installation disc.
     var tools: URL { directory.appendingPathComponent("tools.iso") }
-    /// A Windows machine's GPU (EngineTuning.windowsGPU): on unless turned off.
+    /// A Windows machine's GPU (EngineTuning.windowsGPU): off unless turned on. On an iPad Windows' compositor
+    /// gives the GPU up as soon as it has made its Direct3D device, again and again (the screen flashes): not solved.
     var gpu: Bool?
     /// Windows has the GPU's driver: seen taking the display in a session. The machine then starts with the GPU as
     /// its only display (the firmware's framebuffer would be a second monitor to Windows).
