@@ -1290,15 +1290,26 @@ static void translate_dc_zva(Emit *e, uint32_t insn, uint64_t pc) {
    still goes through the helper. Returns 1 if handled. */
 #define SR(op0, op1, crn, crm, op2) ((op0) << 14 | (op1) << 11 | (crn) << 7 | (crm) << 3 | (op2))
 
+/* A field of the CPU, at any offset: one too far for an LDR's immediate is reached through the register itself. */
+static void put_ldr_cpu(Emit *e, int r, uint32_t off) {
+    if (off < 32768) {
+        put(e, LDR_X(r, 28, off));
+        return;
+    }
+    put(e, 0xd2800000u | (off & 0xffff) << 5 | (uint32_t)r);         /* movz r, #low */
+    put(e, 0xf2a00000u | (off >> 16) << 5 | (uint32_t)r);            /* movk r, #high, lsl 16 */
+    put(e, 0xf8606800u | (uint32_t)r << 16 | 28 << 5 | (uint32_t)r); /* ldr r, [x28, r] */
+}
+
 static void put_load_field(Emit *e, int rt, uint32_t off) {
     if (rt == 31) return;
     if (!is_stolen(rt)) {
-        put(e, LDR_X(rt, 28, off));
+        put_ldr_cpu(e, rt, off);
         return;
     }
     uint8_t s = 15; /* free scratch: the spill below is empty */
     spill(e, &s, 1);
-    put(e, LDR_X(s, 28, off));
+    put_ldr_cpu(e, s, off);
     put(e, STR_X(s, 28, slot_of(rt)));
     unspill(e, &s, 1);
 }
@@ -1522,6 +1533,19 @@ static int translate_sysreg_inline(Emit *e, uint32_t insn, uint64_t pc) {
         if (!read || !el1) return 0;
         uint32_t off = reg == SR(3, 0, 1, 0, 0) ? HV_CPU_SCTLR_EL1 : reg == SR(3, 0, 5, 2, 0) ? HV_CPU_ESR_EL1 : HV_CPU_FAR_EL1;
         put_load_field(e, rt, off);
+        return 1;
+    }
+    /* Read at every exception and system call by Windows' kernel (a few hundred thousand times a second while it
+       starts): the stored values, as the helper would return them. */
+    case SR(3, 0, 12, 0, 0): /* VBAR_EL1 */
+    case SR(2, 0, 0, 2, 2):  /* MDSCR_EL1 */
+    case SR(3, 0, 2, 0, 0):  /* TTBR0_EL1 */
+    case SR(3, 0, 2, 0, 1):  /* TTBR1_EL1 */
+    case SR(3, 0, 13, 0, 1): /* CONTEXTIDR_EL1 */ {
+        if (!read || !el1) return 0;
+        put_load_field(e, rt, reg == SR(3, 0, 12, 0, 0) ? offsetof(HvCpu, vbar_el1) : reg == SR(2, 0, 0, 2, 2) ? offsetof(HvCpu, mdscr_el1) :
+                              reg == SR(3, 0, 2, 0, 0) ? offsetof(HvCpu, ttbr0_el1) : reg == SR(3, 0, 2, 0, 1) ? offsetof(HvCpu, ttbr1_el1) :
+                              offsetof(HvCpu, contextidr_el1));
         return 1;
     }
     case SR(3, 0, 4, 1, 0): /* SP_EL0: only while it is banked (SPSel = 1) */
